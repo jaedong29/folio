@@ -13,6 +13,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -107,6 +108,27 @@ public class TransactionController {
       @Valid @RequestBody CashFlowRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(transactionService.withdraw(userId, assetId, request));
+  }
+
+  /**
+   * 잘못 입력한 거래를 삭제하고 자산 상태를 다시 계산한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param assetId 대상 자산 id
+   * @param transactionId 삭제할 거래 id
+   * @return 재계산된 자산 상태
+   */
+  @Operation(
+      summary = "거래 삭제 (오입력 정정)",
+      description =
+          "거래를 지우고 남은 이력을 tradedAt 순으로 재생해 수량·평단가·실현손익을 다시 계산한다. "
+              + "삭제 시 이후 거래의 보유 수량이 음수가 되면 400 으로 거부한다.")
+  @DeleteMapping("/{transactionId}")
+  public ResponseEntity<TransactionResponse.AssetSnapshot> delete(
+      @CurrentUserId Long userId,
+      @PathVariable Long assetId,
+      @PathVariable Long transactionId) {
+    return ResponseEntity.ok(transactionService.delete(userId, assetId, transactionId));
   }
 
   /**

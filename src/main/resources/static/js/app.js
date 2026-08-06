@@ -10,7 +10,7 @@ const TOKEN_KEY = 'asset-dashboard.token';
 const NICK_KEY = 'asset-dashboard.nickname';
 
 const $ = (id) => document.getElementById(id);
-const state = { portfolioType: '', assets: [], chart: null };
+const state = { portfolioType: '', assets: [], chart: null, detailAssetId: null };
 
 /* ── HTTP ──────────────────────────────────────── */
 
@@ -261,35 +261,148 @@ function renderRecent(transactions) {
     </div>`).join('');
 }
 
-/* ── 거래 내역 드로어 ──────────────────────────── */
+/* ── 자산 상세 드로어 (조회 + 정정) ────────────────
+ *
+ * FAB(+)는 "새로 만드는" 동선이라 이미 있는 것을 고칠 수 없다. 수정은 대상에서 출발해야 하므로,
+ * 자산 행을 누르면 열리는 이 드로어에 정정 수단을 모았다.
+ */
 
 document.addEventListener('click', async (e) => {
   const row = e.target.closest('.row[data-asset-id]');
   if (!row) return;
-  openHistory(row.dataset.assetId, row.dataset.assetName);
+  openAssetDetail(Number(row.dataset.assetId));
 });
 
-async function openHistory(assetId, assetName) {
-  $('drawer-title').textContent = `${assetName} 거래 내역`;
+async function openAssetDetail(assetId) {
+  state.detailAssetId = assetId;
   $('drawer-body').innerHTML = '<div class="empty-row">불러오는 중…</div>';
   $('drawer-backdrop').hidden = false;
+  await renderAssetDetail();
+}
+
+async function renderAssetDetail() {
+  const assetId = state.detailAssetId;
   try {
-    const list = await api(`/api/assets/${assetId}/transactions`);
-    $('drawer-body').innerHTML = list.length
-      ? list.map((t) => `
-        <div class="row" style="cursor:default">
-          <div class="row-main">
-            <div class="row-name"><span class="pill pill-${t.type}">${t.type}</span></div>
-            <div class="row-sub">${fmtDate(t.tradedAt)}${t.memo ? ' · ' + t.memo : ''}</div>
-          </div>
-          <div class="row-right">
-            <div class="row-value">${num(t.quantity)}</div>
-            ${t.price != null ? `<div class="row-delta">${num(t.price, 2)} × ${num(t.exchangeRate, 2)}</div>` : ''}
-          </div>
-        </div>`).join('')
-      : '<div class="empty-row">거래 내역이 없습니다</div>';
+    const [asset, history] = await Promise.all([
+      api(`/api/assets/${assetId}`),
+      api(`/api/assets/${assetId}/transactions`),
+    ]);
+    $('drawer-title').innerHTML = `${asset.name} <span class="row-sym">· ${asset.symbol}</span>`;
+
+    const isInvestment = asset.type === 'STOCK' || asset.type === 'CRYPTO';
+    $('drawer-body').innerHTML = `
+      <div class="detail-stats">
+        <div><span>보유 수량</span><strong>${num(asset.quantity)}</strong></div>
+        ${isInvestment ? `<div><span>평균 매입가</span><strong>${won(asset.avgPrice)}</strong></div>` : ''}
+        <div><span>평가금액</span><strong>${won(asset.valuationKRW)}</strong></div>
+        ${isInvestment ? `<div><span>실현손익</span><strong class="${signClass(asset.realizedPnl)}">${signedWon(asset.realizedPnl)}</strong></div>` : ''}
+      </div>
+
+      <div class="detail-actions">
+        <button class="chip" data-act="rename">이름 수정</button>
+        ${isInvestment ? '<button class="chip" data-act="price">시세 입력</button>' : ''}
+        ${isInvestment ? '<button class="chip" data-act="fx">환율 입력</button>' : ''}
+        <button class="chip chip-danger" data-act="remove">자산 삭제</button>
+      </div>
+
+      <h4 class="detail-heading">거래 내역 <em class="hint">잘못 입력한 거래를 지우면 평단가·실현손익이 다시 계산됩니다</em></h4>
+      <div class="list">
+        ${history.length ? history.map((t) => `
+          <div class="row" style="cursor:default">
+            <div class="row-main">
+              <div class="row-name"><span class="pill pill-${t.type}">${t.type}</span></div>
+              <div class="row-sub">${fmtDate(t.tradedAt)}${t.memo ? ' · ' + t.memo : ''}</div>
+            </div>
+            <div class="row-right">
+              <div class="row-value">${num(t.quantity)}</div>
+              ${t.price != null ? `<div class="row-delta">${num(t.price, 2)} × ${num(t.exchangeRate, 2)}</div>` : ''}
+            </div>
+            <button class="btn-icon btn-del" data-tx-id="${t.id}" title="이 거래 삭제">🗑</button>
+          </div>`).join('') : '<div class="empty-row">거래 내역이 없습니다</div>'}
+      </div>
+      <p id="drawer-error" class="error"></p>`;
+
+    bindDetailActions(asset);
   } catch (err) {
     $('drawer-body').innerHTML = `<div class="empty-row">${err.message}</div>`;
+  }
+}
+
+function bindDetailActions(asset) {
+  const err = (message) => { $('drawer-error').textContent = message; };
+
+  $('drawer-body').querySelectorAll('.chip').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.act;
+      if (action === 'rename') return editField(asset, 'name');
+      if (action === 'price') return editField(asset, 'price');
+      if (action === 'fx') return editField(asset, 'fx');
+      if (action === 'remove') return removeAsset(asset);
+    });
+  });
+
+  $('drawer-body').querySelectorAll('.btn-del').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm('이 거래를 삭제할까요? 남은 거래로 평단가·실현손익이 다시 계산됩니다.')) return;
+      err('');
+      button.disabled = true;
+      try {
+        await api(`/api/assets/${asset.id}/transactions/${button.dataset.txId}`, { method: 'DELETE' });
+        toast('거래를 삭제하고 다시 계산했습니다');
+        await renderAssetDetail();
+        await refresh();
+      } catch (e) {
+        button.disabled = false;
+        err(e.message);
+      }
+    });
+  });
+}
+
+const EDIT_SPEC = {
+  name: { label: '표시 이름', path: '', field: 'name', value: (a) => a.name, cast: (v) => v },
+  price: { label: '현재가 (원래 통화 기준)', path: '/price', field: 'currentPrice',
+           value: (a) => a.currentPrice ?? '', cast: Number },
+  fx: { label: '환율 (원/통화)', path: '/exchange-rate', field: 'exchangeRate',
+        value: (a) => a.exchangeRate, cast: Number },
+};
+
+/** 자산의 한 필드를 수정한다. 세 API 가 형태만 다르고 흐름이 같아 하나로 묶었다. */
+function editField(asset, kind) {
+  const spec = EDIT_SPEC[kind];
+  const input = prompt(`${asset.name} — ${spec.label}`, spec.value(asset));
+  if (input === null || input.trim() === '') return;
+
+  (async () => {
+    try {
+      await api(`/api/assets/${asset.id}${spec.path}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ [spec.field]: spec.cast(input.trim()) }),
+      });
+      toast('수정했습니다');
+      await renderAssetDetail();
+      await refresh();
+    } catch (e) {
+      $('drawer-error').textContent = e.message;
+    }
+  })();
+}
+
+async function removeAsset(asset) {
+  // 삭제는 Soft Delete 라 거래 내역과 실현손익이 보존되고, 같은 심볼을 다시 등록하면 그대로 복구된다.
+  // 사용자가 "초기화"로 오해하지 않도록 미리 알린다.
+  const ok = confirm(
+    `'${asset.name}'을(를) 목록에서 제거할까요?\n\n`
+    + '거래 내역과 실현손익은 보존됩니다. 같은 심볼을 다시 등록하면 이 자산이 그대로 복구됩니다.\n'
+    + '숫자를 되돌리려면 자산 삭제가 아니라 거래 삭제를 사용하세요.');
+  if (!ok) return;
+  try {
+    await api(`/api/assets/${asset.id}`, { method: 'DELETE' });
+    $('drawer-backdrop').hidden = true;
+    toast('자산을 삭제했습니다');
+    await refresh();
+  } catch (e) {
+    $('drawer-error').textContent = e.message;
   }
 }
 

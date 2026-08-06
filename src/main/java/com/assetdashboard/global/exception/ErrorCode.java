@@ -36,6 +36,18 @@ public enum ErrorCode {
   /** 존재하지 않는 Asset id 또는 타인 소유 Asset. */
   ASSET_NOT_FOUND(HttpStatus.NOT_FOUND, "자산을 찾을 수 없습니다."),
 
+  /** 존재하지 않는 거래 id 또는 다른 자산에 속한 거래. */
+  TRANSACTION_NOT_FOUND(HttpStatus.NOT_FOUND, "거래를 찾을 수 없습니다."),
+
+  /**
+   * 거래를 삭제하면 이후 거래의 보유 수량이 음수가 되는 경우.
+   *
+   * <p>예: 매수 10 → 매도 5 상태에서 매수를 지우면 매도할 수량이 없어진다. 데이터를 망가뜨리는 대신 삭제를
+   * 거부하고, 나중 거래부터 지우도록 안내한다.
+   */
+  TRANSACTION_DELETE_BREAKS_HISTORY(
+      HttpStatus.BAD_REQUEST, "이 거래를 삭제하면 이후 거래의 보유 수량이 음수가 됩니다. 최근 거래부터 순서대로 삭제해주세요."),
+
   /** 동일 (type, symbol) 자산을 중복 등록한 경우. */
   DUPLICATE_ASSET(HttpStatus.CONFLICT, "이미 등록된 자산입니다."),
 

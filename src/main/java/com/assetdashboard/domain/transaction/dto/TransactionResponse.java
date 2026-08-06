@@ -47,7 +47,24 @@ public record TransactionResponse(
       String name,
       BigDecimal quantity,
       BigDecimal avgPrice,
-      BigDecimal realizedPnl) {}
+      BigDecimal realizedPnl) {
+
+    /**
+     * 자산의 현재 거래 상태를 요약한다.
+     *
+     * @param asset 대상 자산
+     * @return 자산 상태 요약
+     */
+    public static AssetSnapshot from(Asset asset) {
+      return new AssetSnapshot(
+          asset.getId(),
+          asset.getSymbol(),
+          asset.getName(),
+          asset.getQuantity(),
+          asset.getAvgPrice(),
+          asset.getRealizedPnl());
+    }
+  }
 
   /**
    * 거래와 자산 상태를 응답 DTO 로 변환한다.
@@ -65,12 +82,6 @@ public record TransactionResponse(
         tx.getExchangeRate(),
         tx.getMemo(),
         tx.getTradedAt(),
-        new AssetSnapshot(
-            asset.getId(),
-            asset.getSymbol(),
-            asset.getName(),
-            asset.getQuantity(),
-            asset.getAvgPrice(),
-            asset.getRealizedPnl()));
+        AssetSnapshot.from(asset));
   }
 }

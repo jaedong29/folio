@@ -19,6 +19,7 @@ import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -230,6 +231,33 @@ public class Asset extends BaseTimeEntity {
             .add(profitPerUnit.multiply(quantity))
             .setScale(CALC_SCALE, RoundingMode.HALF_UP);
     this.quantity = this.quantity.subtract(quantity);
+  }
+
+  /**
+   * 거래 이력 전체로부터 수량·평단가·실현손익을 처음부터 다시 계산한다.
+   *
+   * <p>거래를 삭제·수정했을 때 사용한다. 삭제된 거래의 영향만 "빼는" 방식은 매도 손익이 그 시점의 평단가에
+   * 의존하기 때문에 성립하지 않는다 — 중간 거래 하나가 사라지면 그 이후 모든 계산의 전제가 바뀐다. 그래서
+   * 되돌리는 대신 <b>남은 이력으로 다시 접는다(fold)</b>.
+   *
+   * <p>이 메서드의 존재가 곧 설계상의 답이다: <b>Asset 의 거래 상태는 Transaction 이력의 파생값이고,
+   * 필드는 매번 재계산하지 않기 위한 스냅샷이다.</b> 평상시에는 증분 갱신으로 비용을 아끼고, 이력이 바뀐
+   * 순간에만 전체 재계산을 한다.
+   *
+   * <p>시세·환율·이름처럼 거래에서 파생되지 않는 값은 건드리지 않는다.
+   *
+   * @param transactions 적용할 거래 이력. <b>호출자가 원하는 순서로 정렬해서 넘겨야 한다</b> (이 프로젝트는
+   *     {@code tradedAt} 오름차순)
+   * @throws InsufficientAssetQuantityException 재생 도중 보유 수량이 음수가 되는 경우
+   */
+  public void replay(List<Transaction> transactions) {
+    this.quantity = BigDecimal.ZERO;
+    this.realizedPnl = BigDecimal.ZERO;
+    this.avgPrice = type.isCashLike() ? BigDecimal.ONE : null;
+
+    for (Transaction tx : transactions) {
+      applyTransaction(tx);
+    }
   }
 
   /**

@@ -1,7 +1,9 @@
 package com.assetdashboard.domain.transaction.repository;
 
 import com.assetdashboard.domain.transaction.entity.Transaction;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -25,6 +27,42 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
    * @return 거래 목록 (tradedAt 내림차순)
    */
   List<Transaction> findAllByAssetIdOrderByTradedAtDescIdDesc(Long assetId);
+
+  /**
+   * 특정 자산의 거래 내역을 <b>거래 시점 오름차순</b>으로 조회한다.
+   *
+   * <p>거래 삭제 후 상태를 다시 계산할 때 쓴다. 같은 {@code tradedAt} 이면 입력 순서(id)로 안정 정렬해,
+   * 재계산 결과가 실행할 때마다 달라지지 않게 한다.
+   *
+   * @param assetId 자산 id (소유권이 이미 검증된 값)
+   * @return 거래 목록 (tradedAt 오름차순, 동률이면 id 오름차순)
+   */
+  List<Transaction> findAllByAssetIdOrderByTradedAtAscIdAsc(Long assetId);
+
+  /**
+   * 주어진 시점보다 나중에 일어난 거래가 이미 존재하는지 확인한다.
+   *
+   * <p>새 거래가 이력의 <b>중간에 끼워 넣어지는지</b>(과거 시점 거래를 뒤늦게 입력하는 경우)를 판별하는 데 쓴다.
+   * 맨 뒤에 붙는 거래는 증분 계산으로 충분하지만, 중간에 끼면 그 이후 계산의 전제가 바뀌므로 전체를 다시 접어야
+   * 한다.
+   *
+   * @param assetId 자산 id
+   * @param tradedAt 기준 거래 시점
+   * @return 이 시점보다 나중의 거래가 있으면 {@code true}
+   */
+  boolean existsByAssetIdAndTradedAtGreaterThan(Long assetId, LocalDateTime tradedAt);
+
+  /**
+   * 특정 자산에 속한 거래 한 건을 조회한다.
+   *
+   * <p>{@code assetId} 를 조건에 포함하는 이유는 자산 소유권 검사를 우회할 수 없게 하기 위해서다. 다른 사람의
+   * 자산에 속한 거래 id 를 내 자산 경로로 넘겨도 조회되지 않는다.
+   *
+   * @param id 거래 id
+   * @param assetId 자산 id (소유권이 이미 검증된 값)
+   * @return 해당 자산의 거래이면 Transaction, 아니면 빈 Optional
+   */
+  Optional<Transaction> findByIdAndAssetId(Long id, Long assetId);
 
   /**
    * 여러 자산의 거래 내역을 최신순으로 조회한다. Dashboard 의 "최근 거래 N건"에 사용한다.
