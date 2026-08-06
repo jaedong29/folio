@@ -7,6 +7,9 @@ spring:
     default-property-inclusion: always
     serialization:
       write-dates-as-timestamps: false
+    generator:
+      # DECIMAL(20,8) 값이 "0E-8" 같은 지수 표기로 나가면 프론트에서 그대로 표시된다.
+      write-bigdecimal-as-plain: true
   jpa:
     open-in-view: false
     properties:
