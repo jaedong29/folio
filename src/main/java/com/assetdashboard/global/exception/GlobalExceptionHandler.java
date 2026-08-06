@@ -1,0 +1,129 @@
+package com.assetdashboard.global.exception;
+
+import jakarta.validation.ConstraintViolationException;
+import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+/**
+ * 모든 컨트롤러 예외를 PRD 4-7의 공통 에러 형식으로 변환하는 핸들러.
+ *
+ * <p>컨트롤러가 예외 처리 코드를 갖지 않도록 하고, 어떤 경로로 실패하든 응답 형식이 하나로 유지되게 한다.
+ */
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+  /**
+   * 비즈니스 규칙 위반을 해당 에러 코드의 상태로 응답한다.
+   *
+   * @param e 발생한 비즈니스 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler(BusinessException.class)
+  public ResponseEntity<ErrorResponse> handleBusiness(BusinessException e) {
+    ErrorCode code = e.getErrorCode();
+    log.warn("[BusinessException] {} - {}", code.name(), e.getMessage());
+    return ResponseEntity.status(code.getStatus()).body(ErrorResponse.of(code, e.getMessage()));
+  }
+
+  /**
+   * Bean Validation 위반을 {@code INVALID_INPUT}으로 응답한다.
+   *
+   * @param e 검증 실패 예외
+   * @return 어떤 필드가 왜 실패했는지 담은 에러 응답
+   */
+  @ExceptionHandler(MethodArgumentNotValidException.class)
+  public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) {
+    String detail =
+        e.getBindingResult().getFieldErrors().stream()
+            .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
+            .collect(Collectors.joining(", "));
+    return badRequest(detail.isBlank() ? ErrorCode.INVALID_INPUT.getMessage() : detail);
+  }
+
+  /**
+   * 쿼리 파라미터·경로 변수 수준의 제약 위반을 {@code INVALID_INPUT}으로 응답한다.
+   *
+   * @param e 제약 위반 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler(ConstraintViolationException.class)
+  public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException e) {
+    return badRequest(e.getMessage());
+  }
+
+  /**
+   * 요청 본문 파싱 실패(잘못된 JSON, 알 수 없는 Enum 값 등)를 {@code INVALID_INPUT}으로 응답한다.
+   *
+   * @param e 파싱 실패 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler({
+    HttpMessageNotReadableException.class,
+    MethodArgumentTypeMismatchException.class,
+    MissingServletRequestParameterException.class
+  })
+  public ResponseEntity<ErrorResponse> handleUnreadable(Exception e) {
+    log.warn("[InvalidRequest] {}", e.getMessage());
+    return badRequest(ErrorCode.INVALID_INPUT.getMessage());
+  }
+
+  /**
+   * 낙관적 락 충돌을 {@code 409 CONCURRENT_MODIFICATION}으로 응답한다.
+   *
+   * <p>같은 Asset에 거의 동시에 두 건의 거래가 들어와 두 번째 커밋이 실패한 상황이다. 클라이언트는 재시도하면 된다.
+   *
+   * @param e 낙관적 락 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler(OptimisticLockingFailureException.class)
+  public ResponseEntity<ErrorResponse> handleOptimisticLock(OptimisticLockingFailureException e) {
+    log.warn("[OptimisticLock] {}", e.getMessage());
+    return ResponseEntity.status(ErrorCode.CONCURRENT_MODIFICATION.getStatus())
+        .body(ErrorResponse.of(ErrorCode.CONCURRENT_MODIFICATION));
+  }
+
+  /**
+   * 유니크 제약 위반을 {@code 409 DUPLICATE_ASSET}으로 응답한다.
+   *
+   * <p>스키마에 존재하는 유니크 제약은 {@code users.email}과 {@code (user_id, type, symbol)} 뿐이며,
+   * 이메일 중복은 서비스에서 먼저 걸러진다. 따라서 여기까지 도달하는 무결성 위반은 사실상 자산 중복 등록의 경합
+   * 케이스다.
+   *
+   * @param e 무결성 위반 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException e) {
+    log.warn("[DataIntegrityViolation] {}", e.getMostSpecificCause().getMessage());
+    return ResponseEntity.status(ErrorCode.DUPLICATE_ASSET.getStatus())
+        .body(ErrorResponse.of(ErrorCode.DUPLICATE_ASSET));
+  }
+
+  /**
+   * 처리되지 않은 예외를 500으로 응답한다.
+   *
+   * @param e 발생한 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler(Exception.class)
+  public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
+    log.error("[UnexpectedException]", e);
+    return ResponseEntity.status(ErrorCode.INTERNAL_ERROR.getStatus())
+        .body(ErrorResponse.of(ErrorCode.INTERNAL_ERROR));
+  }
+
+  private ResponseEntity<ErrorResponse> badRequest(String message) {
+    return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+        .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, message));
+  }
+}

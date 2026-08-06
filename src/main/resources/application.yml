@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: asset-dashboard
+  profiles:
+    default: local
+  jackson:
+    default-property-inclusion: always
+    serialization:
+      write-dates-as-timestamps: false
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8080
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  jwt:
+    # 데모용 기본값. 운영에서는 APP_JWT_SECRET 환경변수로 주입한다.
+    secret: ${APP_JWT_SECRET:asset-dashboard-local-development-secret-key-must-be-at-least-32-bytes}
+    expiration-minutes: 1440
+  price:
+    cache-ttl-minutes: 15
+    timeout-millis: 2000
+    # false 로 두면 모든 외부 시세 호출을 즉시 실패시킨다 (PRD 8-3 시나리오 8 검증용).
+    external-enabled: ${APP_PRICE_EXTERNAL_ENABLED:true}
+
+logging:
+  level:
+    com.assetdashboard: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:assetdashboard;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    # Hibernate 가 스키마를 만든 뒤에 seed.sql 이 실행되도록 초기화를 지연시킨다.
+    defer-datasource-initialization: true
+    hibernate:
+      ddl-auto: create-drop
+  sql:
+    init:
+      mode: always
+      data-locations: classpath:db/seed.sql
+
+---
+spring:
+  config:
+    activate:
+      on-profile: mysql
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:assetdashboard}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME:asset}
+    password: ${DB_PASSWORD:assetpw}
+  jpa:
+    hibernate:
+      ddl-auto: update
