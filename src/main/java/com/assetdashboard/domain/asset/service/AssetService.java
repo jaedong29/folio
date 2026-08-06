@@ -1,18 +1,27 @@
 package com.assetdashboard.domain.asset.service;
 
+import com.assetdashboard.domain.asset.dto.AllocationResponse;
 import com.assetdashboard.domain.asset.dto.AssetCreateRequest;
 import com.assetdashboard.domain.asset.dto.AssetCreationResult;
 import com.assetdashboard.domain.asset.dto.AssetResponse;
 import com.assetdashboard.domain.asset.dto.AssetUpdateRequest;
+import com.assetdashboard.domain.asset.dto.PortfolioResponse;
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.entity.AssetSource;
+import com.assetdashboard.domain.asset.entity.AssetType;
 import com.assetdashboard.domain.asset.repository.AssetRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.infra.price.PriceProperties;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,7 +40,14 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class AssetService {
 
+  /** Portfolio 에 노출되는 자산 종류. */
+  private static final List<AssetType> INVESTMENT_TYPES = List.of(AssetType.STOCK, AssetType.CRYPTO);
+
+  /** 배분 비율(%)의 소수 자릿수. */
+  private static final int RATIO_SCALE = 2;
+
   private final AssetRepository assetRepository;
+  private final PriceProperties priceProperties;
 
   /**
    * 자산을 등록한다.
@@ -159,6 +175,112 @@ public class AssetService {
     Asset asset = getOwnedAsset(userId, assetId);
     asset.updateExchangeRate(exchangeRate);
     return AssetResponse.from(asset);
+  }
+
+  // ---------------------------------------------------------------------
+  // 조회 View — Portfolio / Allocation
+  // ---------------------------------------------------------------------
+
+  /**
+   * Portfolio 화면용 투자 자산 목록을 조회한다 (PRD 4-5).
+   *
+   * <p>{@code type} 을 생략하면 STOCK 과 CRYPTO 를 모두 반환한다. 화면의 탭이 [전체][CRYPTO][STOCK] 이므로
+   * 여기서 "전체"는 <b>투자 자산 전체</b>를 뜻하며 현금성 자산은 포함하지 않는다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param type 필터링할 자산 종류 (null 이면 STOCK + CRYPTO)
+   * @param sort {@code 필드,방향} 형식의 정렬 조건 (기본값 {@code unrealizedPnl,desc})
+   * @return 정렬된 Portfolio 목록
+   * @throws BusinessException 투자 자산이 아닌 종류를 지정하면 {@code INVALID_INPUT}
+   */
+  public List<PortfolioResponse> getPortfolio(Long userId, AssetType type, String sort) {
+    if (type != null && !type.isInvestment()) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "Portfolio 는 STOCK/CRYPTO 만 조회할 수 있습니다. (요청: %s)".formatted(type));
+    }
+    List<AssetType> types = (type != null) ? List.of(type) : INVESTMENT_TYPES;
+
+    List<PortfolioResponse> items =
+        assetRepository.findAllByUserIdAndTypeInAndDeletedAtIsNull(userId, types).stream()
+            .map(asset -> PortfolioResponse.from(asset, priceProperties.cacheTtlMinutes()))
+            .collect(Collectors.toCollection(ArrayList::new));
+
+    items.sort(PortfolioSort.parse(sort).comparator());
+    return items;
+  }
+
+  /**
+   * type 단위 자산 배분을 계산한다 (Pie Chart 용, PRD 4-4).
+   *
+   * <p>평가금액을 계산할 수 없는 자산(현재가를 한 번도 확보하지 못한 경우)은 0으로 취급한다. 비율의 분모는 전체
+   * 평가금액 합계이며, 합계가 0이면 모든 비율을 0으로 반환한다.
+   *
+   * @param assets 집계 대상 자산 목록
+   * @return 평가금액이 큰 순서의 배분 목록
+   */
+  public List<AllocationResponse> calculateAllocation(List<Asset> assets) {
+    Map<AssetType, BigDecimal> byType = new EnumMap<>(AssetType.class);
+    for (Asset asset : assets) {
+      BigDecimal valuation = valuationOrZero(asset);
+      byType.merge(asset.getType(), valuation, BigDecimal::add);
+    }
+
+    BigDecimal total =
+        byType.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+
+    return byType.entrySet().stream()
+        .map(
+            entry -> {
+              BigDecimal ratio =
+                  total.compareTo(BigDecimal.ZERO) == 0
+                      ? BigDecimal.ZERO.setScale(RATIO_SCALE)
+                      : entry
+                          .getValue()
+                          .multiply(BigDecimal.valueOf(100))
+                          .divide(total, RATIO_SCALE, RoundingMode.HALF_UP);
+              return new AllocationResponse(entry.getKey(), entry.getValue(), ratio);
+            })
+        .sorted(Comparator.comparing(AllocationResponse::valuationKRW).reversed())
+        .toList();
+  }
+
+  /**
+   * 자산의 평가금액을 반환하되, 계산할 수 없으면 0으로 대체한다.
+   *
+   * <p>총자산 합계에서 이런 자산을 제외하면 화면의 총액이 조용히 작아진다. 그 사실은 각 자산의
+   * {@code valuationKRW: null} 과 {@code priceStale: true} 로 사용자에게 드러난다.
+   *
+   * @param asset 대상 자산
+   * @return 평가금액. 계산 불가이면 0
+   */
+  public BigDecimal valuationOrZero(Asset asset) {
+    BigDecimal valuation = asset.getValuation();
+    return valuation == null ? BigDecimal.ZERO : valuation;
+  }
+
+  /**
+   * 내 활성 자산 엔티티 전체를 반환한다. Dashboard Facade 가 조립에 사용한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @return 활성 자산 목록
+   */
+  public List<Asset> getActiveAssets(Long userId) {
+    return assetRepository.findAllByUserIdAndDeletedAtIsNull(userId);
+  }
+
+  /**
+   * 삭제된 자산까지 포함한 누적 실현손익을 합산한다.
+   *
+   * <p>Soft Delete 를 쓰는 이유가 "확정된 수익 기록의 보존"인데, 모든 조회에서 삭제 자산을 빼면 정작 그 기록이
+   * 대시보드에서 사라진다. 보유 목록·총자산·배분에서는 삭제 자산을 제외하되 <b>손익 합계에만</b> 포함한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @return 삭제 자산을 포함한 누적 실현손익 합계 (KRW)
+   */
+  public BigDecimal getTotalRealizedPnl(Long userId) {
+    return assetRepository.findAllByUserId(userId).stream()
+        .map(Asset::getRealizedPnl)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
   }
 
   /**
