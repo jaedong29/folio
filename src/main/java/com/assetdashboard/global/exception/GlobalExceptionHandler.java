@@ -5,13 +5,17 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 모든 컨트롤러 예외를 PRD 4-7의 공통 에러 형식으로 변환하는 핸들러.
@@ -107,6 +111,38 @@ public class GlobalExceptionHandler {
     log.warn("[DataIntegrityViolation] {}", e.getMostSpecificCause().getMessage());
     return ResponseEntity.status(ErrorCode.DUPLICATE_ASSET.getStatus())
         .body(ErrorResponse.of(ErrorCode.DUPLICATE_ASSET));
+  }
+
+  /**
+   * 지원하지 않는 HTTP 메서드 요청을 405로 응답한다.
+   *
+   * <p>이 핸들러가 없으면 아래 {@code Exception} 핸들러가 잡아 500 으로 응답한다. 클라이언트 실수를 서버 오류로
+   * 보고하는 셈이라, 원인을 찾는 데 불필요한 시간을 쓰게 만든다.
+   *
+   * @param e 메서드 불일치 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+  public ResponseEntity<ErrorResponse> handleMethodNotSupported(
+      HttpRequestMethodNotSupportedException e) {
+    return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+        .body(
+            new ErrorResponse(
+                HttpStatus.METHOD_NOT_ALLOWED.value(),
+                "METHOD_NOT_ALLOWED",
+                "지원하지 않는 요청 방식입니다: %s".formatted(e.getMethod())));
+  }
+
+  /**
+   * 존재하지 않는 경로 요청을 404로 응답한다.
+   *
+   * @param e 정적 리소스/핸들러를 찾지 못한 예외
+   * @return 에러 응답
+   */
+  @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+  public ResponseEntity<ErrorResponse> handleNotFound(Exception e) {
+    return ResponseEntity.status(HttpStatus.NOT_FOUND)
+        .body(new ErrorResponse(HttpStatus.NOT_FOUND.value(), "NOT_FOUND", "존재하지 않는 경로입니다."));
   }
 
   /**

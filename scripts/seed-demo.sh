@@ -49,10 +49,19 @@ tx "$KB"   deposit  '{"quantity":8500000,"memo":"월급 입금","tradedAt":"2026
 tx "$CASH" deposit  '{"quantity":1200000,"memo":"생활비","tradedAt":"2026-08-06T09:00:00"}'
 tx "$KB"   withdraw '{"quantity":450000,"memo":"카드값","tradedAt":"2026-08-06T12:00:00"}'
 
-echo "▸ 폴백용 수동 시세 입력 (해외주식 환율은 MVP 에서 수동 입력이다)"
-# Yahoo Finance 가 죽어 있어도 화면이 정상적으로 그려지는지 이 값으로 확인할 수 있다 (PRD 8-1 대응).
-setprice "$NVDA" 219.22
-setfx    "$NVDA" 1417
+echo "▸ 환율 입력 (해외주식의 환율은 MVP 에서 수동 입력이다 — Roadmap 7-2)"
+setfx "$NVDA" 1417
+
+# 자동 조회가 성공했다면 그 값을 그대로 둔다. Yahoo Finance 가 죽어 있어 현재가가 비어 있을 때만
+# 폴백값을 넣어, 외부 API 상태와 무관하게 화면이 항상 채워지도록 한다 (PRD 8-1 대응).
+NVDA_PRICE=$(curl -s "$B/api/assets/$NVDA" -H "Authorization: Bearer $T" \
+  | sed -n 's/.*"currentPrice":\([^,]*\),.*/\1/p')
+if [ "$NVDA_PRICE" = "null" ] || [ -z "$NVDA_PRICE" ]; then
+  echo "  ⚠ Yahoo Finance 조회 실패 — NVDA 에 폴백 시세를 수동 입력합니다"
+  setprice "$NVDA" 219.22
+else
+  echo "  ✓ NVDA 자동 조회 성공: $NVDA_PRICE USD"
+fi
 
 echo
 echo "✅ 완료. http://localhost:8080 에서 $EMAIL / $PASSWORD 로 로그인하세요."

@@ -13,6 +13,7 @@ NOW="2026-08-06T09:00:00"
 
 ok()   { PASS=$((PASS+1)); printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 ng()   { FAIL=$((FAIL+1)); printf "  \033[31mFAIL\033[0m %s\n" "$1"; }
+skip() { printf "  \033[33mSKIP\033[0m %s\n" "$1"; }
 check(){ if [ "$2" = "$3" ]; then ok "$1 (기대=$2, 실제=$3)"; else ng "$1 (기대=$2, 실제=$3)"; fi; }
 # 수치 비교 — 15.0 과 15.00000000 을 같은 값으로 본다 (DECIMAL 자릿수 표기 차이 무시)
 checknum(){
@@ -65,8 +66,11 @@ curl -s -o /dev/null -X POST $B/api/auth/signup -H 'Content-Type: application/js
 TA=$(curl -s -X POST $B/api/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"a$SUFFIX@example.com\",\"password\":\"1234abcd\"}" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
 TB=$(curl -s -X POST $B/api/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"b$SUFFIX@example.com\",\"password\":\"1234abcd\"}" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
 
-# A 의 자산 (STOCK — 외부 시세가 죽어 있어도 등록되도록 국내 심볼 사용)
-R=$(req POST /api/assets "$TA" "{\"type\":\"STOCK\",\"symbol\":\"TEST$SUFFIX.KS\",\"name\":\"검증종목\",\"currency\":\"KRW\"}")
+# A 의 검증용 자산.
+# 실존 심볼(BTC)을 쓴다. 존재하지 않는 심볼을 픽스처로 쓰면, 외부 API 가 살아 있을 때
+# 등록 자체가 INVALID_SYMBOL 로 거부되어 이후 시나리오가 전부 무너진다.
+# 외부 API 가 죽어 있을 때는 등록이 허용되므로(PRD 4-2), 어느 쪽이든 이 픽스처는 만들어진다.
+R=$(req POST /api/assets "$TA" '{"type":"CRYPTO","symbol":"BTC","name":"검증용","currency":"USDT"}')
 AID=$(field "$(body "$R")" id)
 
 echo
@@ -115,7 +119,7 @@ checknum "  realizedPnl 유지" "17000.00000005" "$(field "$(body "$R")" asset r
 
 echo
 echo "[6] 같은 symbol 중복 등록 → 409 DUPLICATE_ASSET"
-R=$(req POST /api/assets "$TA" "{\"type\":\"STOCK\",\"symbol\":\"test$SUFFIX.ks\",\"name\":\"소문자 중복\",\"currency\":\"KRW\"}")
+R=$(req POST /api/assets "$TA" '{"type":"CRYPTO","symbol":"btc","name":"소문자 중복","currency":"USDT"}')
 check "중복 등록 (소문자 입력도 정규화되어 차단)" "409" "$(code "$R")"
 check "  에러 코드" "DUPLICATE_ASSET" "$(field "$(body "$R")" code)"
 
@@ -124,8 +128,12 @@ echo "[7] 존재하지 않는 심볼 등록 → 400 INVALID_SYMBOL"
 R=$(req POST /api/assets "$TA" '{"type":"CRYPTO","symbol":"NOTACOIN","name":"없는코인","currency":"USDT"}')
 if [ "$(code "$R")" = "400" ]; then
   check "없는 심볼 거부" "INVALID_SYMBOL" "$(field "$(body "$R")" code)"
+elif [ "$(code "$R")" = "201" ] && [ "${EXPECT_STALE:-0}" = "1" ]; then
+  # 외부 강제 실패 모드에서는 심볼 검증 자체를 건너뛰고 등록을 허용하는 것이 PRD 4-2의 의도된 동작이다.
+  # 7번과 8번은 서로 배타적이므로, 이 모드에서는 7번을 SKIP 으로 처리한다.
+  skip "없는 심볼 거부 — 외부 강제 실패 모드에서는 검증을 건너뛰고 등록을 허용하는 것이 정상 (PRD 4-2)"
 elif [ "$(code "$R")" = "201" ]; then
-  ng "없는 심볼 거부 — 외부 API 자체가 응답하지 않아 등록이 허용됨(PRD 4-2의 의도된 동작). 네트워크 확인 필요"
+  ng "없는 심볼 거부 — 외부 API 가 응답하지 않아 등록이 허용됨. 네트워크 상태를 확인하세요"
 else
   ng "없는 심볼 거부 (예상 밖 응답: $(code "$R"))"
 fi

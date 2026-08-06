@@ -15,10 +15,22 @@ import org.springframework.web.client.RestClient;
 @Configuration
 public class PriceHttpConfig {
 
-  /** Yahoo Finance 는 브라우저가 아닌 요청을 거절하는 경우가 있어 User-Agent 를 명시한다. */
-  private static final String USER_AGENT =
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
-          + " Chrome/124.0 Safari/537.36";
+  /**
+   * Yahoo Finance 는 User-Agent 를 보고 요청을 걸러낸다.
+   *
+   * <p>실측 결과 (같은 IP, 같은 시각):
+   *
+   * <pre>
+   *   User-Agent 없음                 → 429 Too Many Requests
+   *   전체 Chrome UA (Mozilla/5.0 …)  → 429 Too Many Requests
+   *   "Mozilla/5.0"                   → 200 OK
+   * </pre>
+   *
+   * <p>브라우저를 정교하게 흉내 낼수록 오히려 차단된다 — 진짜 Chrome 이라면 함께 왔을 쿠키·헤더가 없어 봇으로
+   * 판별되는 것으로 보인다. 비공식 API 에 의존할 때 감수해야 하는 종류의 불안정성이며, 공식 API 전환의 근거이기도
+   * 하다(Roadmap 7-2).
+   */
+  private static final String USER_AGENT = "Mozilla/5.0";
 
   /**
    * 타임아웃이 설정된 시세 조회 전용 RestClient 를 만든다.
