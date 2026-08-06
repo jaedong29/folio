@@ -427,14 +427,16 @@ public class Asset extends BaseTimeEntity {
   private void requireInvestmentType(String action) {
     if (!type.isInvestment()) {
       throw new BusinessException(
-          ErrorCode.INVALID_INPUT, "%s는 STOCK/CRYPTO 자산에만 가능합니다. (현재 타입: %s)".formatted(action, type));
+          ErrorCode.INVALID_INPUT,
+          "STOCK/CRYPTO 자산에만 가능한 거래입니다. (요청: %s, 현재 타입: %s)".formatted(action, type));
     }
   }
 
   private void requireCashLikeType(String action) {
     if (!type.isCashLike()) {
       throw new BusinessException(
-          ErrorCode.INVALID_INPUT, "%s는 CASH/BANK 자산에만 가능합니다. (현재 타입: %s)".formatted(action, type));
+          ErrorCode.INVALID_INPUT,
+          "CASH/BANK 자산에만 가능한 거래입니다. (요청: %s, 현재 타입: %s)".formatted(action, type));
     }
   }
 
