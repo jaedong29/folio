@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asset Dashboard</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ── 로그인 ─────────────────────────────────────── -->
+<section id="login-view" class="login-wrap">
+  <div class="login-card">
+    <h1 class="brand">Asset<span>Dashboard</span></h1>
+    <p class="brand-sub">흩어진 자산을 한 화면에서</p>
+
+    <form id="login-form" autocomplete="on">
+      <label>이메일<input type="email" id="login-email" value="demo@example.com" required /></label>
+      <label>비밀번호<input type="password" id="login-password" value="1234abcd" required /></label>
+      <button type="submit" class="btn-primary">로그인</button>
+      <button type="button" id="signup-btn" class="btn-ghost">이 정보로 회원가입</button>
+    </form>
+    <p id="login-error" class="error"></p>
+  </div>
+</section>
+
+<!-- ── 대시보드 ───────────────────────────────────── -->
+<section id="app-view" hidden>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">📊</span>
+      <strong>Asset Dashboard</strong>
+    </div>
+    <div class="topbar-right">
+      <span id="user-nickname" class="nickname"></span>
+      <button id="refresh-btn" class="btn-icon" title="새로고침">↻</button>
+      <button id="logout-btn" class="btn-ghost sm">로그아웃</button>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- 빈 상태 -->
+    <div id="empty-state" class="empty" hidden>
+      <div class="empty-emoji">🪙</div>
+      <h2>아직 등록된 자산이 없어요</h2>
+      <p>아래 + 버튼을 눌러 첫 자산을 등록해보세요</p>
+    </div>
+
+    <div id="dashboard-body" hidden>
+      <!-- 총 자산 -->
+      <section class="card hero">
+        <div class="hero-label">총 자산</div>
+        <div class="hero-value" id="total-asset">₩0</div>
+        <div class="hero-meta">
+          <span id="stale-badge" class="badge badge-warn" hidden>⚠ 일부 시세가 오래됨</span>
+        </div>
+      </section>
+
+      <div class="grid-2">
+        <!-- Investment Summary -->
+        <section class="card">
+          <h2 class="card-title">Investment Summary</h2>
+          <div class="stat-row">
+            <span>평가금액</span><strong id="inv-valuation">-</strong>
+          </div>
+          <div class="stat-row">
+            <span>매입금액</span><strong id="inv-cost">-</strong>
+          </div>
+          <div class="stat-row divider">
+            <span>평가손익</span>
+            <strong id="inv-unrealized">-</strong>
+          </div>
+          <div class="stat-row">
+            <span>실현손익 <em class="hint">(삭제 자산 포함)</em></span>
+            <strong id="inv-realized">-</strong>
+          </div>
+        </section>
+
+        <!-- Allocation -->
+        <section class="card">
+          <h2 class="card-title">Asset Allocation</h2>
+          <div class="chart-wrap"><canvas id="allocation-chart"></canvas></div>
+          <ul class="legend" id="allocation-legend"></ul>
+        </section>
+      </div>
+
+      <!-- 보유 자산 -->
+      <section class="card">
+        <div class="card-head">
+          <h2 class="card-title">보유 자산</h2>
+          <div class="tabs" id="portfolio-tabs">
+            <button class="tab active" data-type="">전체</button>
+            <button class="tab" data-type="CRYPTO">CRYPTO</button>
+            <button class="tab" data-type="STOCK">STOCK</button>
+          </div>
+        </div>
+        <div id="portfolio-list" class="list"></div>
+      </section>
+
+      <div class="grid-2">
+        <!-- Cash & Bank -->
+        <section class="card">
+          <h2 class="card-title">Cash &amp; Bank</h2>
+          <div id="cash-list" class="list"></div>
+        </section>
+
+        <!-- 최근 거래 -->
+        <section class="card">
+          <h2 class="card-title">최근 거래</h2>
+          <div id="recent-list" class="list"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <button id="fab" class="fab" title="자산 등록 / 거래 입력">+</button>
+</section>
+
+<!-- ── 모달 ───────────────────────────────────────── -->
+<div id="modal-backdrop" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title">무엇을 하시겠어요?</h3>
+      <button id="modal-close" class="btn-icon">✕</button>
+    </div>
+    <div id="modal-body"></div>
+    <p id="modal-error" class="error"></p>
+  </div>
+</div>
+
+<!-- 거래 내역 드로어 -->
+<div id="drawer-backdrop" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="drawer-title">거래 내역</h3>
+      <button id="drawer-close" class="btn-icon">✕</button>
+    </div>
+    <div id="drawer-body" class="list"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
