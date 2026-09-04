@@ -5,6 +5,7 @@ import com.assetdashboard.domain.user.dto.ChangePasswordRequest;
 import com.assetdashboard.domain.user.dto.DeleteAccountRequest;
 import com.assetdashboard.domain.user.dto.LoginRequest;
 import com.assetdashboard.domain.user.dto.LoginResponse;
+import com.assetdashboard.domain.user.dto.RefreshTokenRequest;
 import com.assetdashboard.domain.user.dto.SignupRequest;
 import com.assetdashboard.domain.user.dto.UserResponse;
 import com.assetdashboard.domain.user.service.UserService;
@@ -31,8 +32,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 인증 API (PRD 4-1).
  *
- * <p>로그아웃 API 는 두지 않는다. JWT 는 서버가 상태를 저장하지 않으므로 클라이언트가 토큰을 삭제하는 것으로
- * 로그아웃을 처리한다.
+ * <p>Access Token은 짧게 살고(기본 30분) 무상태로 검증한다. 세션 연장은 서버가 저장·회전·폐기할 수 있는
+ * Refresh Token이 담당하며, 로그아웃과 비밀번호 변경·회원 탈퇴는 이 Refresh Token을 실제로 무효화한다.
  */
 @Tag(name = "Auth", description = "회원가입 / 로그인")
 @RestController
@@ -78,10 +79,43 @@ public class AuthController {
    * @param request 이메일·비밀번호
    * @return 액세스 토큰
    */
-  @Operation(summary = "로그인", description = "성공 시 24시간짜리 JWT 를 발급한다. 인증 불필요.")
+  @Operation(
+      summary = "로그인",
+      description = "성공 시 짧은 수명의 Access Token과 세션 연장용 Refresh Token을 함께 발급한다. 인증 불필요.")
   @PostMapping("/login")
   public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
     return ResponseEntity.ok(userService.login(request));
+  }
+
+  /**
+   * Refresh Token을 새 Access Token·Refresh Token으로 교환한다.
+   *
+   * @param request 이전에 받은 Refresh Token
+   * @return 새로 발급된 토큰 쌍
+   */
+  @Operation(
+      summary = "토큰 재발급",
+      description = "Refresh Token은 매 호출마다 새 값으로 교체(rotate)된다. 이미 교체돼 폐기된 토큰이 다시 오면 "
+          + "탈취로 간주해 같은 로그인에서 나온 모든 Refresh Token을 폐기한다. 인증 불필요.")
+  @PostMapping("/refresh")
+  public ResponseEntity<LoginResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+    return ResponseEntity.ok(userService.refresh(request.refreshToken()));
+  }
+
+  /**
+   * 이 기기의 Refresh Token만 폐기한다.
+   *
+   * @param request 폐기할 Refresh Token
+   * @return 본문이 없는 성공 응답
+   */
+  @Operation(
+      summary = "로그아웃",
+      description = "제시한 Refresh Token을 서버에서 폐기한다. 이미 발급된 Access Token은 자체 만료 시각까지 "
+          + "유효하므로 만료 시간을 짧게 유지한다. 인증 불필요(Refresh Token 자체가 자격 증명).")
+  @PostMapping("/logout")
+  public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
+    userService.logout(request.refreshToken());
+    return ResponseEntity.noContent().build();
   }
 
   /**

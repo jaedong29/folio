@@ -17,6 +17,8 @@ import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.security.RefreshTokenRepository;
+import com.assetdashboard.global.security.RefreshTokenService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -38,6 +40,8 @@ public class UserAccountService {
   private final AgentEvaluationRecordRepository agentEvaluationRecordRepository;
   private final LiveEvaluationBatchJobRepository liveEvaluationBatchJobRepository;
   private final LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
+  private final RefreshTokenRepository refreshTokenRepository;
+  private final RefreshTokenService refreshTokenService;
   private final PasswordEncoder passwordEncoder;
 
   /** 현재 비밀번호를 확인하고 새 비밀번호를 저장한다.
@@ -53,6 +57,8 @@ public class UserAccountService {
       throw new BusinessException(ErrorCode.INVALID_INPUT, "새 비밀번호는 현재 비밀번호와 달라야 합니다.");
     }
     user.changePassword(passwordEncoder.encode(request.newPassword()));
+    // 비밀번호가 새어나갔을 가능성에 대비해 다른 기기의 세션도 모두 끊는다.
+    refreshTokenService.revokeAllForUser(userId);
   }
 
   /** 비밀번호와 확인 문구를 검증한 뒤 계정의 모든 데이터를 영구 삭제한다.
@@ -85,6 +91,7 @@ public class UserAccountService {
       agentTraceRunRepository.deleteAllByUserId(userId);
     }
     evidenceDocumentRepository.deleteAllByUserId(userId);
+    refreshTokenRepository.deleteAllByUserId(userId);
     if (!assetIds.isEmpty()) {
       transactionRepository.deleteAllByAssetIdIn(assetIds);
       assetRepository.deleteAllByIdInBatch(assetIds);

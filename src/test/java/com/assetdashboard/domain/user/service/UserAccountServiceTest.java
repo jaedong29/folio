@@ -21,6 +21,8 @@ import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.security.RefreshTokenRepository;
+import com.assetdashboard.global.security.RefreshTokenService;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,8 @@ class UserAccountServiceTest {
   @Mock private AgentEvaluationRecordRepository agentEvaluationRecordRepository;
   @Mock private LiveEvaluationBatchJobRepository liveEvaluationBatchJobRepository;
   @Mock private LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
+  @Mock private RefreshTokenRepository refreshTokenRepository;
+  @Mock private RefreshTokenService refreshTokenService;
   @Mock private PasswordEncoder passwordEncoder;
   @Mock private Asset asset;
 
@@ -64,6 +68,8 @@ class UserAccountServiceTest {
             agentEvaluationRecordRepository,
             liveEvaluationBatchJobRepository,
             liveEvaluationBatchCaseRepository,
+            refreshTokenRepository,
+            refreshTokenService,
             passwordEncoder);
     user = User.create("user@example.com", "encoded-old", "user");
     when(userRepository.findById(7L)).thenReturn(java.util.Optional.of(user));

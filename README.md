@@ -35,7 +35,7 @@ Folio는 증권 주문 앱이나 금융기관 연동 서비스가 아닙니다. 
 | Financial Evidence | 가격·환율·평단·최근 거래 근거 조회, `CONFIRMED/PARTIAL/UNAVAILABLE` 판정 |
 | Personal Evidence | 등록 자산별 자료·메모 붙여넣기, 출처 메타데이터·중복 방지·키워드 검색 |
 | Shared News | 공용 공식자료 저장, 출처 화이트리스트, 비동기 수집·중복 제거·TTL, 전체/내 자산 필터, NIM 한국어 요약 캐시 |
-| Auth | JWT 인증, BCrypt 비밀번호, 이메일 중복확인, 비밀번호 변경·회원 탈퇴, 소유권 기반 404 인가 정책 |
+| Auth | 짧은 Access Token + 회전·폐기되는 Refresh Token, BCrypt 비밀번호, 이메일 중복확인, 비밀번호 변경·회원 탈퇴, 소유권 기반 404 인가 정책 |
 | UX | 금액 가리기, 모바일 현재가 펼쳐보기, 빈 값·stale 상태 표시, 구체적인 오류 안내 |
 
 ## 설계 개요
@@ -175,6 +175,8 @@ SELL : 투자 자산 감소 + 같은 통화 대기자금 증가
 - Transaction에는 `user_id`가 없으므로 거래 조회 전에 부모 Asset의 소유권을 반드시 확인합니다.
 
 회원가입의 이메일 중복확인은 사용 편의를 위한 사전 확인입니다. 최종 중복 방지는 가입 요청과 DB unique constraint에서 다시 수행합니다. 비밀번호 확인은 서버에 저장할 데이터가 아니므로 프론트에서만 검증하고, 비밀번호는 BCrypt로 저장합니다.
+
+Access Token은 탈취돼도 피해가 작도록 짧게 유지합니다(기본 30분, `APP_JWT_EXPIRATION_MINUTES`). 세션 연장은 서버가 저장·회전(rotate)·폐기(revoke)할 수 있는 Refresh Token이 맡습니다. 재발급마다 값이 바뀌며(rotation), 이미 회전에 쓰여 폐기된 토큰이 다시 들어오면 탈취로 간주해 같은 로그인에서 나온 Refresh Token을 모두 폐기하고 재로그인을 요구합니다. 로그아웃(`POST /api/auth/logout`), 비밀번호 변경, 회원 탈퇴는 모두 Refresh Token을 실제로 폐기합니다 — 다만 이미 발급된 Access Token은 무상태 JWT라 자체 만료 시각까지는 계속 유효하므로, 그 노출 창을 좁게 유지하는 것이 이 설계의 핵심입니다. 토큰 원문은 저장하지 않고 SHA-256 해시만 저장합니다.
 
 ### 8. 동시 수정은 낙관적 락으로 감지합니다
 
@@ -329,7 +331,9 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 |---|---|---|
 | `GET` | `/api/auth/email-availability` | 이메일 사용 가능 여부 |
 | `POST` | `/api/auth/signup` | 회원가입 |
-| `POST` | `/api/auth/login` | JWT 발급 |
+| `POST` | `/api/auth/login` | Access Token(30분) + Refresh Token(14일) 발급 |
+| `POST` | `/api/auth/refresh` | Refresh Token 회전(rotate) — 재사용 탐지 시 전체 세션 폐기 |
+| `POST` | `/api/auth/logout` | 이 기기의 Refresh Token 폐기 |
 | `GET` | `/api/auth/me` | 현재 로그인 사용자 |
 | `PATCH` | `/api/auth/password` | 비밀번호 변경 |
 | `DELETE` | `/api/auth/account` | 계정·자산·거래·Snapshot 영구 삭제 |
@@ -382,6 +386,7 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 - 낙관적 락 충돌은 409로 실패시키며 멱등성 키 기반 자동 재시도는 구현하지 않았습니다.
 - 금액 가리기는 화면 노출을 줄이는 UX이며 암호화나 접근통제가 아닙니다.
 - 이메일 중복확인은 실제 이메일 소유권 인증이 아닙니다.
+- 로그인·재발급 API에 rate limit이 없습니다. brute force 방어는 다음 과제입니다.
 - `Asset` Aggregate가 커졌습니다. 다음 리팩터링 후보는 `PositionState`와 `MarketData` 값 객체 분리입니다.
 - DART·OpenDART·KIND·SEC 도메인은 `VERIFIED_OFFICIAL`로 검증합니다. 그 밖의 기업 IR URL은 symbol별 공식 도메인 연결이 없으므로 `USER_ASSERTED_OFFICIAL`로 남깁니다.
 - 문서 검색은 평가 가능한 1차 키워드 검색입니다. 임베딩 RAG, 자동 URL 수집, 기사 라이선스 처리는 아직 구현하지 않았습니다.

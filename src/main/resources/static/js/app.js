@@ -7,6 +7,7 @@
 
 const API = '';
 const TOKEN_KEY = 'asset-dashboard.token';
+const REFRESH_TOKEN_KEY = 'asset-dashboard.refresh-token';
 const NICK_KEY = 'asset-dashboard.nickname';
 const PRIVACY_KEY = 'asset-dashboard.privacy-hidden';
 
@@ -32,6 +33,7 @@ const state = {
   newsSummaryTimer: null,
   detailAssetId: null,
   refreshPromise: null,
+  tokenRefreshPromise: null,
   krSecurities: null,
   krSecuritiesPromise: null,
   privacyHidden: localStorage.getItem(PRIVACY_KEY) === 'true',
@@ -41,13 +43,51 @@ const state = {
 /* ── HTTP ──────────────────────────────────────── */
 
 function token() { return localStorage.getItem(TOKEN_KEY); }
+function refreshTokenValue() { return localStorage.getItem(REFRESH_TOKEN_KEY); }
 
-async function api(path, options = {}) {
+function storeSession(res) {
+  localStorage.setItem(TOKEN_KEY, res.accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, res.refreshToken);
+  localStorage.setItem(NICK_KEY, res.nickname);
+}
+
+// Access Token은 짧게 살고(기본 30분) Refresh Token으로 조용히 갱신한다. 동시에 여러 요청이
+// 401을 받아도 재발급은 한 번만 진행하도록 진행 중인 Promise를 공유한다.
+async function refreshAccessToken() {
+  if (state.tokenRefreshPromise) return state.tokenRefreshPromise;
+  const rt = refreshTokenValue();
+  if (!rt) return false;
+
+  state.tokenRefreshPromise = (async () => {
+    try {
+      const res = await fetch(API + '/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: rt }),
+      });
+      if (!res.ok) return false;
+      storeSession(await res.json());
+      return true;
+    } catch {
+      return false;
+    } finally {
+      state.tokenRefreshPromise = null;
+    }
+  })();
+  return state.tokenRefreshPromise;
+}
+
+async function api(path, options = {}, retriedAfterRefresh = false) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   const t = token();
   if (t) headers.Authorization = `Bearer ${t}`;
 
   const res = await fetch(API + path, { ...options, headers });
+
+  if (res.status === 401 && !retriedAfterRefresh && refreshTokenValue()) {
+    if (await refreshAccessToken()) return api(path, options, true);
+  }
+
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
 
@@ -177,8 +217,7 @@ $('login-form').addEventListener('submit', async (e) => {
       method: 'POST',
       body: JSON.stringify({ email: $('login-email').value, password: $('login-password').value }),
     });
-    localStorage.setItem(TOKEN_KEY, res.accessToken);
-    localStorage.setItem(NICK_KEY, res.nickname);
+    storeSession(res);
     enterApp();
   } catch (err) {
     $('login-error').textContent = err.message;
@@ -278,12 +317,21 @@ $('signup-form').addEventListener('submit', async (event) => {
 $('logout-btn').addEventListener('click', logout);
 
 function logout() {
-  // JWT 는 서버가 상태를 저장하지 않으므로, 로그아웃은 클라이언트가 토큰을 지우는 것으로 끝난다(PRD 4-1).
   clearTimeout(state.newsRefreshTimer);
   state.newsRefreshTimer = null;
   clearTimeout(state.newsSummaryTimer);
   state.newsSummaryTimer = null;
+  const rt = refreshTokenValue();
+  if (rt) {
+    // 서버의 Refresh Token도 실제로 폐기한다. 실패해도 로컬 로그아웃 자체는 막지 않는다.
+    fetch(API + '/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: rt }),
+    }).catch(() => {});
+  }
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(NICK_KEY);
   $('app-view').hidden = true;
   $('login-view').hidden = false;

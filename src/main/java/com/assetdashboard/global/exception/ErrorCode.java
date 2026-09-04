@@ -34,6 +34,9 @@ public enum ErrorCode {
   /** 이메일 또는 비밀번호가 일치하지 않는 경우. */
   INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
 
+  /** Refresh Token이 없거나 만료·폐기되었거나 이미 회전(rotate)되어 재사용된 경우. */
+  INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "다시 로그인해주세요."),
+
   /**
    * 타인 소유 자산 접근 시도. 클라이언트에는 노출하지 않고 서버 로그 기록 전용으로만 사용한다 (PRD 4-0 규칙 3).
    */

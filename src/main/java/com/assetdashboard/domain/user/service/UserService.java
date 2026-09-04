@@ -9,7 +9,10 @@ import com.assetdashboard.domain.user.entity.User;
 import com.assetdashboard.domain.user.repository.UserRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.security.IssuedRefreshToken;
 import com.assetdashboard.global.security.JwtTokenProvider;
+import com.assetdashboard.global.security.RefreshTokenRotation;
+import com.assetdashboard.global.security.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,6 +30,7 @@ public class UserService {
   private final UserRepository userRepository;
   private final PasswordEncoder passwordEncoder;
   private final JwtTokenProvider tokenProvider;
+  private final RefreshTokenService refreshTokenService;
 
   /**
    * 회원가입 전에 이메일 사용 가능 여부를 확인한다.
@@ -74,6 +78,7 @@ public class UserService {
    * @return 액세스 토큰을 담은 응답
    * @throws BusinessException 이메일이 없거나 비밀번호가 틀린 경우 {@code INVALID_CREDENTIALS}
    */
+  @Transactional
   public LoginResponse login(LoginRequest request) {
     String email = request.email().trim().toLowerCase();
     // 미가입 이메일과 비밀번호 불일치를 같은 에러로 응답해 계정 존재 여부가 새어나가지 않게 한다.
@@ -87,10 +92,48 @@ public class UserService {
       throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
     }
 
+    IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId());
     return LoginResponse.of(
         tokenProvider.createToken(user.getId()),
         tokenProvider.getExpiresInSeconds(),
+        refreshToken.rawToken(),
         user.getNickname());
+  }
+
+  /**
+   * Refresh Token을 회전(rotate)해 새 Access Token과 Refresh Token을 발급한다.
+   *
+   * <p>이미 회전에 쓰여 폐기된 토큰이 다시 들어오면 탈취로 간주해 같은 로그인에서 나온 모든 Refresh Token을
+   * 폐기하고 재로그인을 요구한다.
+   *
+   * @param rawRefreshToken 이전 로그인·재발급에서 받은 Refresh Token
+   * @return 새 Access Token과 Refresh Token을 담은 응답
+   * @throws BusinessException 토큰이 없거나 만료·폐기된 경우 {@code INVALID_REFRESH_TOKEN}
+   */
+  @Transactional
+  public LoginResponse refresh(String rawRefreshToken) {
+    RefreshTokenRotation rotation = refreshTokenService.rotate(rawRefreshToken);
+    User user =
+        userRepository
+            .findById(rotation.userId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+
+    return LoginResponse.of(
+        tokenProvider.createToken(user.getId()),
+        tokenProvider.getExpiresInSeconds(),
+        rotation.token().rawToken(),
+        user.getNickname());
+  }
+
+  /**
+   * 이 Refresh Token만 폐기한다. Access Token은 자체 만료 시각까지는 계속 유효하다(무상태 JWT의 한계이며,
+   * 그래서 Access Token 수명을 짧게 유지한다).
+   *
+   * @param rawRefreshToken 폐기할 Refresh Token
+   */
+  @Transactional
+  public void logout(String rawRefreshToken) {
+    refreshTokenService.revoke(rawRefreshToken);
   }
 
   /**

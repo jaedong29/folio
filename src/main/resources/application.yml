@@ -34,7 +34,9 @@ app:
   jwt:
     # 데모용 기본값. 운영에서는 APP_JWT_SECRET 환경변수로 주입한다.
     secret: ${APP_JWT_SECRET:asset-dashboard-local-development-secret-key-must-be-at-least-32-bytes}
-    expiration-minutes: 1440
+    # Access Token은 탈취돼도 피해가 작도록 짧게 유지한다. 세션 연장은 revoke·rotate 가능한 Refresh Token이 담당한다.
+    expiration-minutes: ${APP_JWT_EXPIRATION_MINUTES:30}
+    refresh-expiration-days: ${APP_JWT_REFRESH_EXPIRATION_DAYS:14}
   price:
     cache-ttl-minutes: 15
     timeout-millis: 2000
