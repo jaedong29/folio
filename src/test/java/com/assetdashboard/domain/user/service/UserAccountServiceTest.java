@@ -21,6 +21,7 @@ import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.domain.transaction.repository.IdempotencyKeyRepository;
 import com.assetdashboard.global.security.RefreshTokenRepository;
 import com.assetdashboard.global.security.RefreshTokenService;
 import java.util.List;
@@ -48,6 +49,7 @@ class UserAccountServiceTest {
   @Mock private LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
   @Mock private RefreshTokenRepository refreshTokenRepository;
   @Mock private RefreshTokenService refreshTokenService;
+  @Mock private IdempotencyKeyRepository idempotencyKeyRepository;
   @Mock private PasswordEncoder passwordEncoder;
   @Mock private Asset asset;
 
@@ -70,6 +72,7 @@ class UserAccountServiceTest {
             liveEvaluationBatchCaseRepository,
             refreshTokenRepository,
             refreshTokenService,
+            idempotencyKeyRepository,
             passwordEncoder);
     user = User.create("user@example.com", "encoded-old", "user");
     when(userRepository.findById(7L)).thenReturn(java.util.Optional.of(user));

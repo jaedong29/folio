@@ -14,11 +14,12 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | 비밀 관리 | API 키·JWT Secret은 환경변수로만 주입, 코드·설정 파일에 저장하지 않음. `prod` 프로필은 `APP_JWT_SECRET` 없으면 기동 자체가 실패 | `application.yml`, `JwtTokenProvider.java` |
 | 데이터 삭제 | 회원 탈퇴 시 자산·거래·Snapshot·근거 문서·Agent Trace·평가 배치·Refresh Token까지 연쇄 삭제, 고아 레코드 없음 | `UserAccountService.deleteAccount()` |
 | 인가 | 소유권 기반 404(리소스 존재 여부 비노출), `SecurityContext` 기반 `userId`만 신뢰, 신규 API는 기본적으로 인증 필요(명시적으로 연 경로만 예외) | `SecurityConfig.java` |
-| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V8`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
+| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V9`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
 | 백업 | AWS 스테이징용 백업·복구·검증 스크립트 존재(수동 실행) | `deploy/aws/backup.sh`, `restore.sh`, `verify-backup.sh` |
 | LLM 안전장치 | 숫자 조작·가격 인과·Prompt Injection·문장수·비정상 토큰을 규칙 기반으로 차단, 골든셋으로 회귀 검증 | `evidence/news/NewsAnswerGuardrail.java`, `news/NewsSummaryGuardrail.java` |
 | 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
 | 골든셋 Live 커버리지 확장 | fixture만으로 확장 가능한 4건(`stale-price`, `stale-fx`, `transaction-evidence`, `price-direction`)을 추가해 5개 → 9개로, 이어서 `searchSymbolEvidence` Agent Tool을 연결해 사용자 등록 근거 자료 7건을 추가해 9개 → 16개로 확장. 나머지 2개(`news-correlation`, `future-document`)는 멀티 Tool 체이닝·날짜 파싱이 필요해 포함하지 않음(아래 갭 참고) | `evidence/document/SymbolEvidenceService.java`, `SymbolEvidenceAnswerGuardrail.java`, `LiveEvaluationBatchQueueService.SUPPORTED_CASES` |
+| 거래 멱등성 키 | 매수·매도·입금·출금 4개 API가 `Idempotency-Key` 헤더를 필수로 받아, 네트워크 재시도·버튼 중복 클릭으로 같은 요청이 두 번 와도 한 번만 체결. DB unique 제약(`user_id`, `idempotency_key`)으로 동시 요청 경합도 막고, 같은 키에 다른 요청 본문이 오면 `409 IDEMPOTENCY_KEY_REUSED`로 거부. 24시간 뒤 자동 만료 | `domain/transaction/service/TransactionIdempotencyService.java`, `V9__idempotency_keys.sql` |
 
 ## 남은 갭
 

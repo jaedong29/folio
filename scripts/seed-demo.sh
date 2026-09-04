@@ -31,7 +31,8 @@ assets = json.load(sys.stdin)
 print(next(a["id"] for a in assets if a["type"] == "CASH" and a["symbol"] == symbol))
 ' "$1"; }
 tx() { curl -fsS -o /dev/null -X POST "$B/api/assets/$1/transactions/$2" -H "Authorization: Bearer $T" \
-        -H 'Content-Type: application/json' -d "$3"; }
+        -H 'Content-Type: application/json' \
+        -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "$3"; }
 setprice() { curl -s -o /dev/null -X PATCH "$B/api/assets/$1/price" -H "Authorization: Bearer $T" \
         -H 'Content-Type: application/json' -d "{\"currentPrice\":$2}"; }
 setfx() { curl -s -o /dev/null -X PATCH "$B/api/assets/$1/exchange-rate" -H "Authorization: Bearer $T" \

@@ -56,9 +56,19 @@ except Exception:
 
 req() { # method path token body → "HTTPCODE|BODY"
   local m=$1 p=$2 t=$3 b=${4:-}
+  local idem_header=""
+  if [[ "$p" == */transactions/buy || "$p" == */transactions/sell \
+        || "$p" == */transactions/deposit || "$p" == */transactions/withdraw ]]; then
+    idem_header="Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')"
+  fi
   if [ -n "$b" ]; then
-    curl -s -w "\n%{http_code}" -X "$m" "$B$p" -H "Authorization: Bearer $t" \
-      -H 'Content-Type: application/json' -d "$b"
+    if [ -n "$idem_header" ]; then
+      curl -s -w "\n%{http_code}" -X "$m" "$B$p" -H "Authorization: Bearer $t" \
+        -H 'Content-Type: application/json' -H "$idem_header" -d "$b"
+    else
+      curl -s -w "\n%{http_code}" -X "$m" "$B$p" -H "Authorization: Bearer $t" \
+        -H 'Content-Type: application/json' -d "$b"
+    fi
   else
     curl -s -w "\n%{http_code}" -X "$m" "$B$p" -H "Authorization: Bearer $t"
   fi

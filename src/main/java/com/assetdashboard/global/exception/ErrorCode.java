@@ -54,6 +54,15 @@ public enum ErrorCode {
   /** 존재하지 않는 거래 id 또는 다른 자산에 속한 거래. */
   TRANSACTION_NOT_FOUND(HttpStatus.NOT_FOUND, "거래를 찾을 수 없습니다."),
 
+  /** 매수·매도·입금·출금에 Idempotency-Key 헤더가 없는 경우. */
+  IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "Idempotency-Key 헤더가 필요합니다."),
+
+  /** 같은 Idempotency-Key를 내용이 다른 요청에 재사용한 경우. */
+  IDEMPOTENCY_KEY_REUSED(HttpStatus.CONFLICT, "이 Idempotency-Key는 이미 다른 요청에 사용됐습니다."),
+
+  /** 같은 Idempotency-Key의 이전 요청이 아직 끝나지 않은 경우. */
+  IDEMPOTENCY_KEY_IN_PROGRESS(HttpStatus.CONFLICT, "이전 요청이 아직 처리 중입니다. 잠시 후 다시 시도해주세요."),
+
   /**
    * 거래를 삭제하면 이후 거래의 보유 수량이 음수가 되는 경우.
    *

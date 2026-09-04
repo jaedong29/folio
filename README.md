@@ -186,7 +186,7 @@ Access Token은 탈취돼도 피해가 작도록 짧게 유지합니다(기본 3
 
 정산 연동 이후 BTC와 ETH를 동시에 매수해도 같은 사용자의 USDT 대기자금에서 충돌할 수 있습니다. 다만 이 서비스는 개인이 거래를 수동 기록하는 MVP이고 대기자금도 사용자별·통화별로 분리되어 있어, 충돌을 기다리게 하는 비관적 락보다 저동시성에 적합한 낙관적 락을 유지했습니다.
 
-자동 재시도는 버튼 중복 요청까지 두 번 성공시킬 수 있습니다. 멱등성 키 없이 안전하지 않으므로 현재는 명시적 409 실패까지만 책임집니다.
+낙관적 락은 서로 다른 요청끼리의 경합만 막을 뿐, 네트워크 재시도나 버튼 중복 클릭처럼 "같은" 요청이 두 번 도착하는 상황은 막지 못합니다. 매수·매도·입금·출금 4개 API는 `Idempotency-Key` 헤더를 필수로 받아, 같은 키로 다시 들어온 요청은 실행하지 않고 첫 응답을 그대로 돌려줍니다(`idempotency_keys` 테이블, `(user_id, idempotency_key)` unique 제약으로 동시 요청의 경합도 방지). 같은 키에 요청 내용이 다르면 `409 IDEMPOTENCY_KEY_REUSED`로 거부합니다. 키는 24시간 뒤 자동 삭제됩니다.
 
 ### 9. 사용자 심볼과 외부 조회 심볼을 분리했습니다
 
@@ -347,10 +347,10 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 | `PATCH` | `/api/assets/{id}/quantity` | opening position 보유 수량 정정 |
 | `PATCH` | `/api/assets/{id}/price` | 현재가 수동 보정 |
 | `PATCH` | `/api/assets/{id}/exchange-rate` | 현재 환율 수동 보정 |
-| `POST` | `/api/assets/{id}/transactions/buy` | 매수와 대기자금 차감 |
-| `POST` | `/api/assets/{id}/transactions/sell` | 매도와 대기자금 입금 |
-| `POST` | `/api/assets/{id}/transactions/deposit` | 외부 입금 |
-| `POST` | `/api/assets/{id}/transactions/withdraw` | 외부 출금 |
+| `POST` | `/api/assets/{id}/transactions/buy` | 매수와 대기자금 차감 (`Idempotency-Key` 헤더 필수) |
+| `POST` | `/api/assets/{id}/transactions/sell` | 매도와 대기자금 입금 (`Idempotency-Key` 헤더 필수) |
+| `POST` | `/api/assets/{id}/transactions/deposit` | 외부 입금 (`Idempotency-Key` 헤더 필수) |
+| `POST` | `/api/assets/{id}/transactions/withdraw` | 외부 출금 (`Idempotency-Key` 헤더 필수) |
 | `DELETE` | `/api/assets/{id}/transactions/{txId}` | 거래 삭제 후 replay·정산 복구 |
 | `GET` | `/api/ai/evidence/assets/{id}` | 계산 입력·공식·누락 경고·최근 거래 근거 |
 | `GET` | `/api/ai/evidence/assets/{id}/price-trend` | 최근 일별 가격·변화율·방향 판정 근거 |
@@ -385,7 +385,6 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 - 수수료, 세금, 배당, 액면분할, 법인행위, tax lot, TWR·MWR, 환차손익 분리는 제외했습니다.
 - Snapshot은 조회 시점에 하루 한 점을 만들며 실제 과거 시세를 역산하는 Batch가 아닙니다. 발표용 90일 데이터는 `DEMO HISTORY`로 구분합니다.
 - Dashboard GET이 외부 시세를 갱신해 DB 파생값을 바꾸는 절충이 있습니다. 규모가 커지면 Scheduler 기반 갱신이 적합합니다.
-- 낙관적 락 충돌은 409로 실패시키며 멱등성 키 기반 자동 재시도는 구현하지 않았습니다.
 - 금액 가리기는 화면 노출을 줄이는 UX이며 암호화나 접근통제가 아닙니다.
 - 이메일 중복확인은 실제 이메일 소유권 인증이 아닙니다.
 - 로그인 잠금·IP 요청 제한은 단일 인스턴스 메모리 상태입니다. 인스턴스를 늘리면 Redis 같은 공유 저장소로 옮겨야 합니다.

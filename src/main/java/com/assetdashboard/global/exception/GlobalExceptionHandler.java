@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -94,6 +95,14 @@ public class GlobalExceptionHandler {
   public ResponseEntity<ErrorResponse> handleParameterMismatch(Exception e) {
     log.warn("[InvalidRequest] {}", e.getMessage());
     return badRequest(ErrorCode.INVALID_INPUT.getMessage());
+  }
+
+  /** 지금은 Idempotency-Key가 이 앱의 유일한 필수 헤더라 그 코드로 바로 매핑한다. */
+  @ExceptionHandler(MissingRequestHeaderException.class)
+  public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException e) {
+    log.warn("[MissingHeader] {}", e.getHeaderName());
+    return ResponseEntity.status(ErrorCode.IDEMPOTENCY_KEY_REQUIRED.getStatus())
+        .body(ErrorResponse.of(ErrorCode.IDEMPOTENCY_KEY_REQUIRED));
   }
 
   /**

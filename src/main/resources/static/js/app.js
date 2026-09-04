@@ -2135,6 +2135,7 @@ function openInlineTransactionForm(asset, kind, initialSide) {
   });
   syncInlinePreview();
 
+  const detailTxIdempotencyKey = crypto.randomUUID();
   $('detail-tx-submit').addEventListener('click', async () => {
     const submitButton = $('detail-tx-submit');
     const error = $('drawer-error');
@@ -2154,6 +2155,7 @@ function openInlineTransactionForm(asset, kind, initialSide) {
       Object.assign(body, exchangeRatePayload(asset, detailFx));
       await api(`/api/assets/${asset.id}/transactions/${side}`, {
         method: 'POST',
+        headers: { 'Idempotency-Key': detailTxIdempotencyKey },
         body: JSON.stringify(body),
       });
       toast('거래를 기록했습니다');
@@ -2850,11 +2852,13 @@ function openTradeForm() {
   $('f-date').addEventListener('change', () => syncTradeFields(false));
   syncTradeFields(true);
 
+  const tradeIdempotencyKey = crypto.randomUUID();
   $('f-submit').addEventListener('click', () => submit(async () => {
     const id = $('f-asset').value;
     const selected = state.assets.find((a) => String(a.id) === id);
     await api(`/api/assets/${id}/transactions/${$('f-side').value}`, {
       method: 'POST',
+      headers: { 'Idempotency-Key': tradeIdempotencyKey },
       body: JSON.stringify({
         quantity: Number($('f-qty').value),
         price: Number($('f-price').value),
@@ -2925,11 +2929,13 @@ function openCashForm() {
   $('f-date').addEventListener('change', () => syncCashFields(false));
   syncCashFields(true);
 
+  const cashIdempotencyKey = crypto.randomUUID();
   $('f-submit').addEventListener('click', () => submit(async () => {
     const id = $('f-asset').value;
     const selected = state.assets.find((a) => String(a.id) === id);
     await api(`/api/assets/${id}/transactions/${$('f-side').value}`, {
       method: 'POST',
+      headers: { 'Idempotency-Key': cashIdempotencyKey },
       body: JSON.stringify({
         quantity: Number($('f-qty').value),
         ...exchangeRatePayload(selected, $('f-fx')),

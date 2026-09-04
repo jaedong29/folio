@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,7 @@ public class TransactionService {
 
   private final TransactionRepository transactionRepository;
   private final AssetService assetService;
+  private final TransactionIdempotencyService idempotencyService;
 
   /**
    * 매수를 기록한다.
@@ -50,12 +52,21 @@ public class TransactionService {
    * @param userId 인증된 사용자 id
    * @param assetId 대상 자산 id
    * @param request 매수 요청
+   * @param idempotencyKey 같은 요청의 재시도를 감지할 클라이언트 요청 id
    * @return 생성된 거래와 반영 후 자산 상태
    * @throws BusinessException 자산이 없거나 타인 소유이면 {@code ASSET_NOT_FOUND}, 투자 자산이 아니면
    *     {@code INVALID_INPUT}
    */
   @Transactional
-  public TransactionResponse buy(Long userId, Long assetId, TradeRequest request) {
+  public TransactionResponse buy(
+      Long userId, Long assetId, TradeRequest request, String idempotencyKey) {
+    Optional<TransactionResponse> cached =
+        idempotencyService.checkAndClaim(
+            userId, idempotencyKey, idempotencyService.fingerprint("buy", assetId, request));
+    if (cached.isPresent()) {
+      return cached.get();
+    }
+
     Asset asset = assetService.getOwnedAsset(userId, assetId);
     Asset settlementAsset =
         resolveSettlementAsset(userId, asset, request.settlementAssetId());
@@ -73,7 +84,9 @@ public class TransactionService {
             settlementAmount,
             request.memo(),
             request.tradedAt());
-    return applyTrade(asset, settlementAsset, tx);
+    TransactionResponse response = applyTrade(asset, settlementAsset, tx);
+    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    return response;
   }
 
   /**
@@ -82,11 +95,20 @@ public class TransactionService {
    * @param userId 인증된 사용자 id
    * @param assetId 대상 자산 id
    * @param request 매도 요청
+   * @param idempotencyKey 같은 요청의 재시도를 감지할 클라이언트 요청 id
    * @return 생성된 거래와 반영 후 자산 상태
    * @throws BusinessException 보유 수량을 초과하면 {@code INSUFFICIENT_ASSET_QUANTITY}
    */
   @Transactional
-  public TransactionResponse sell(Long userId, Long assetId, TradeRequest request) {
+  public TransactionResponse sell(
+      Long userId, Long assetId, TradeRequest request, String idempotencyKey) {
+    Optional<TransactionResponse> cached =
+        idempotencyService.checkAndClaim(
+            userId, idempotencyKey, idempotencyService.fingerprint("sell", assetId, request));
+    if (cached.isPresent()) {
+      return cached.get();
+    }
+
     Asset asset = assetService.getOwnedAsset(userId, assetId);
     Asset settlementAsset =
         resolveSettlementAsset(userId, asset, request.settlementAssetId());
@@ -104,7 +126,9 @@ public class TransactionService {
             settlementAmount,
             request.memo(),
             request.tradedAt());
-    return applyTrade(asset, settlementAsset, tx);
+    TransactionResponse response = applyTrade(asset, settlementAsset, tx);
+    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    return response;
   }
 
   /**
@@ -113,11 +137,20 @@ public class TransactionService {
    * @param userId 인증된 사용자 id
    * @param assetId 대상 자산 id
    * @param request 입금 요청
+   * @param idempotencyKey 같은 요청의 재시도를 감지할 클라이언트 요청 id
    * @return 생성된 거래와 반영 후 자산 상태
    * @throws BusinessException 현금성 자산이 아니면 {@code INVALID_INPUT}
    */
   @Transactional
-  public TransactionResponse deposit(Long userId, Long assetId, CashFlowRequest request) {
+  public TransactionResponse deposit(
+      Long userId, Long assetId, CashFlowRequest request, String idempotencyKey) {
+    Optional<TransactionResponse> cached =
+        idempotencyService.checkAndClaim(
+            userId, idempotencyKey, idempotencyService.fingerprint("deposit", assetId, request));
+    if (cached.isPresent()) {
+      return cached.get();
+    }
+
     Asset asset = assetService.getOwnedAsset(userId, assetId);
     BigDecimal exchangeRate =
         resolveExchangeRate(
@@ -125,7 +158,9 @@ public class TransactionService {
     Transaction tx =
         Transaction.createDeposit(
             assetId, request.quantity(), exchangeRate, request.memo(), request.tradedAt());
-    return apply(asset, tx);
+    TransactionResponse response = apply(asset, tx);
+    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    return response;
   }
 
   /**
@@ -134,11 +169,20 @@ public class TransactionService {
    * @param userId 인증된 사용자 id
    * @param assetId 대상 자산 id
    * @param request 출금 요청
+   * @param idempotencyKey 같은 요청의 재시도를 감지할 클라이언트 요청 id
    * @return 생성된 거래와 반영 후 자산 상태
    * @throws BusinessException 잔액이 부족하면 {@code INSUFFICIENT_ASSET_QUANTITY}
    */
   @Transactional
-  public TransactionResponse withdraw(Long userId, Long assetId, CashFlowRequest request) {
+  public TransactionResponse withdraw(
+      Long userId, Long assetId, CashFlowRequest request, String idempotencyKey) {
+    Optional<TransactionResponse> cached =
+        idempotencyService.checkAndClaim(
+            userId, idempotencyKey, idempotencyService.fingerprint("withdraw", assetId, request));
+    if (cached.isPresent()) {
+      return cached.get();
+    }
+
     Asset asset = assetService.getOwnedAsset(userId, assetId);
     BigDecimal exchangeRate =
         resolveExchangeRate(
@@ -146,7 +190,9 @@ public class TransactionService {
     Transaction tx =
         Transaction.createWithdraw(
             assetId, request.quantity(), exchangeRate, request.memo(), request.tradedAt());
-    return apply(asset, tx);
+    TransactionResponse response = apply(asset, tx);
+    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    return response;
   }
 
   /**

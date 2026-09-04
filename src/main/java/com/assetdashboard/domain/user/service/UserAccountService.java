@@ -3,6 +3,7 @@ package com.assetdashboard.domain.user.service;
 import com.assetdashboard.dashboard.snapshot.PortfolioSnapshotRepository;
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.repository.AssetRepository;
+import com.assetdashboard.domain.transaction.repository.IdempotencyKeyRepository;
 import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.domain.user.dto.ChangePasswordRequest;
 import com.assetdashboard.domain.user.dto.DeleteAccountRequest;
@@ -42,6 +43,7 @@ public class UserAccountService {
   private final LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
   private final RefreshTokenRepository refreshTokenRepository;
   private final RefreshTokenService refreshTokenService;
+  private final IdempotencyKeyRepository idempotencyKeyRepository;
   private final PasswordEncoder passwordEncoder;
 
   /** 현재 비밀번호를 확인하고 새 비밀번호를 저장한다.
@@ -92,6 +94,7 @@ public class UserAccountService {
     }
     evidenceDocumentRepository.deleteAllByUserId(userId);
     refreshTokenRepository.deleteAllByUserId(userId);
+    idempotencyKeyRepository.deleteAllByUserId(userId);
     if (!assetIds.isEmpty()) {
       transactionRepository.deleteAllByAssetIdIn(assetIds);
       assetRepository.deleteAllByIdInBatch(assetIds);

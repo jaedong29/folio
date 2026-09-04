@@ -32,13 +32,15 @@ class TransactionServiceTest {
 
   private TransactionRepository transactionRepository;
   private AssetService assetService;
+  private TransactionIdempotencyService idempotencyService;
   private TransactionService service;
 
   @BeforeEach
   void setUp() {
     transactionRepository = mock(TransactionRepository.class);
     assetService = mock(AssetService.class);
-    service = new TransactionService(transactionRepository, assetService);
+    idempotencyService = mock(TransactionIdempotencyService.class);
+    service = new TransactionService(transactionRepository, assetService, idempotencyService);
   }
 
   @Test
@@ -51,7 +53,7 @@ class TransactionServiceTest {
             ExchangeRateMode.AUTO,
             LocalDateTime.now(KST).minusDays(1));
 
-    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request))
+    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request, "test-key"))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> {
@@ -70,7 +72,7 @@ class TransactionServiceTest {
             ExchangeRateMode.MANUAL,
             LocalDateTime.now(KST).minusDays(1));
 
-    service.buy(1L, fixtures.investment().getId(), request);
+    service.buy(1L, fixtures.investment().getId(), request, "test-key");
 
     assertThat(fixtures.investment().getAvgPrice()).isEqualByComparingTo("13800");
     assertThat(fixtures.settlement().getQuantity()).isEqualByComparingTo("990");
@@ -84,7 +86,7 @@ class TransactionServiceTest {
         tradeRequest(
             new BigDecimal("10"), null, ExchangeRateMode.AUTO, LocalDateTime.now(KST).minusMinutes(1));
 
-    service.buy(1L, fixtures.investment().getId(), request);
+    service.buy(1L, fixtures.investment().getId(), request, "test-key");
 
     assertThat(fixtures.investment().getAvgPrice()).isEqualByComparingTo("14040");
   }
@@ -96,7 +98,7 @@ class TransactionServiceTest {
         tradeRequest(
             new BigDecimal("10"), null, ExchangeRateMode.AUTO, LocalDateTime.now(KST).minusMinutes(1));
 
-    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request))
+    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request, "test-key"))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> assertThat(error.getMessage()).contains("현재 환율", "MANUAL"));
@@ -112,7 +114,7 @@ class TransactionServiceTest {
             ExchangeRateMode.MANUAL,
             LocalDateTime.now(KST).minusMinutes(1));
 
-    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request))
+    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request, "test-key"))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> {
@@ -132,7 +134,7 @@ class TransactionServiceTest {
             ExchangeRateMode.MANUAL,
             LocalDateTime.now(KST).minusMinutes(1));
 
-    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request))
+    assertThatThrownBy(() -> service.buy(1L, fixtures.investment().getId(), request, "test-key"))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> assertThat(error.getErrorCode())
@@ -180,7 +182,7 @@ class TransactionServiceTest {
             "과거 입금",
             LocalDateTime.now(KST).minusDays(1));
 
-    assertThatThrownBy(() -> service.deposit(1L, 30L, request))
+    assertThatThrownBy(() -> service.deposit(1L, 30L, request, "test-key"))
         .isInstanceOfSatisfying(
             BusinessException.class,
             error -> assertThat(error.getMessage()).contains("과거 외화 거래"));

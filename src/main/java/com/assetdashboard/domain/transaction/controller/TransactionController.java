@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -42,16 +43,21 @@ public class TransactionController {
    * @param userId 인증된 사용자 id
    * @param assetId 대상 자산 id
    * @param request 매수 요청
+   * @param idempotencyKey 클라이언트가 재시도 시 그대로 다시 보내는 요청 id. 같은 값이면 두 번 체결되지 않는다
    * @return 생성된 거래와 반영 후 자산 상태 (201)
    */
-  @Operation(summary = "매수", description = "평균 매입 단가가 재계산된다. STOCK/CRYPTO 전용.")
+  @Operation(
+      summary = "매수",
+      description = "평균 매입 단가가 재계산된다. STOCK/CRYPTO 전용. "
+          + "Idempotency-Key 헤더가 같으면 재시도해도 한 번만 체결된다.")
   @PostMapping("/buy")
   public ResponseEntity<TransactionResponse> buy(
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
-      @Valid @RequestBody TradeRequest request) {
+      @Valid @RequestBody TradeRequest request,
+      @RequestHeader("Idempotency-Key") String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(transactionService.buy(userId, assetId, request));
+        .body(transactionService.buy(userId, assetId, request, idempotencyKey));
   }
 
   /**
@@ -64,14 +70,16 @@ public class TransactionController {
    */
   @Operation(
       summary = "매도",
-      description = "실현손익이 누적되고 평균 매입 단가는 유지된다. 보유 수량 초과 시 400 INSUFFICIENT_ASSET_QUANTITY.")
+      description = "실현손익이 누적되고 평균 매입 단가는 유지된다. 보유 수량 초과 시 400 INSUFFICIENT_ASSET_QUANTITY. "
+          + "Idempotency-Key 헤더가 같으면 재시도해도 한 번만 체결된다.")
   @PostMapping("/sell")
   public ResponseEntity<TransactionResponse> sell(
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
-      @Valid @RequestBody TradeRequest request) {
+      @Valid @RequestBody TradeRequest request,
+      @RequestHeader("Idempotency-Key") String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(transactionService.sell(userId, assetId, request));
+        .body(transactionService.sell(userId, assetId, request, idempotencyKey));
   }
 
   /**
@@ -82,14 +90,17 @@ public class TransactionController {
    * @param request 입금 요청
    * @return 생성된 거래와 반영 후 자산 상태 (201)
    */
-  @Operation(summary = "입금", description = "CASH/BANK 전용.")
+  @Operation(
+      summary = "입금",
+      description = "CASH/BANK 전용. Idempotency-Key 헤더가 같으면 재시도해도 한 번만 반영된다.")
   @PostMapping("/deposit")
   public ResponseEntity<TransactionResponse> deposit(
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
-      @Valid @RequestBody CashFlowRequest request) {
+      @Valid @RequestBody CashFlowRequest request,
+      @RequestHeader("Idempotency-Key") String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(transactionService.deposit(userId, assetId, request));
+        .body(transactionService.deposit(userId, assetId, request, idempotencyKey));
   }
 
   /**
@@ -100,14 +111,18 @@ public class TransactionController {
    * @param request 출금 요청
    * @return 생성된 거래와 반영 후 자산 상태 (201)
    */
-  @Operation(summary = "출금", description = "CASH/BANK 전용. 잔액 부족 시 400 INSUFFICIENT_ASSET_QUANTITY.")
+  @Operation(
+      summary = "출금",
+      description = "CASH/BANK 전용. 잔액 부족 시 400 INSUFFICIENT_ASSET_QUANTITY. "
+          + "Idempotency-Key 헤더가 같으면 재시도해도 한 번만 반영된다.")
   @PostMapping("/withdraw")
   public ResponseEntity<TransactionResponse> withdraw(
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
-      @Valid @RequestBody CashFlowRequest request) {
+      @Valid @RequestBody CashFlowRequest request,
+      @RequestHeader("Idempotency-Key") String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(transactionService.withdraw(userId, assetId, request));
+        .body(transactionService.withdraw(userId, assetId, request, idempotencyKey));
   }
 
   /**
