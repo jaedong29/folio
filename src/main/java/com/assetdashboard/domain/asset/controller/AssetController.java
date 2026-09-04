@@ -4,10 +4,14 @@ import com.assetdashboard.domain.asset.dto.AssetCreateRequest;
 import com.assetdashboard.domain.asset.dto.AssetCreationResult;
 import com.assetdashboard.domain.asset.dto.AssetExchangeRateUpdateRequest;
 import com.assetdashboard.domain.asset.dto.AssetPriceUpdateRequest;
+import com.assetdashboard.domain.asset.dto.AssetQuantityCorrectionRequest;
 import com.assetdashboard.domain.asset.dto.AssetResponse;
 import com.assetdashboard.domain.asset.dto.AssetUpdateRequest;
+import com.assetdashboard.domain.asset.dto.PriceHistoryResponse;
+import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.service.AssetService;
 import com.assetdashboard.global.security.CurrentUserId;
+import com.assetdashboard.infra.price.history.PriceHistoryQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -37,6 +41,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AssetController {
 
   private final AssetService assetService;
+  private final PriceHistoryQueryService priceHistoryQueryService;
 
   /**
    * 자산을 등록한다.
@@ -84,6 +89,32 @@ public class AssetController {
     return ResponseEntity.ok(assetService.getAsset(userId, id));
   }
 
+  /** 해당 자산의 외부 시세와 환율만 즉시 다시 조회한다. */
+  @Operation(summary = "개별 자산 시세 새로고침", description = "전체 Portfolio 대신 선택한 자산 하나만 강제 갱신한다.")
+  @PostMapping("/{id}/refresh")
+  public ResponseEntity<AssetResponse> refreshAsset(
+      @CurrentUserId Long userId, @PathVariable Long id) {
+    return ResponseEntity.ok(assetService.refreshAsset(userId, id));
+  }
+
+  /**
+   * 자산 상세에 표시할 최근 7일 시장가격을 조회한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param id 자산 id
+   * @return 일별 종가. 외부 조회 실패 시 마지막 성공값 또는 available=false
+   */
+  @Operation(summary = "최근 시장가격 조회", description = "자산 상세용 최근 7일 일봉. 실패해도 상세 조회를 막지 않는다.")
+  @GetMapping("/{id}/price-history")
+  public ResponseEntity<PriceHistoryResponse> getPriceHistory(
+      @CurrentUserId Long userId, @PathVariable Long id) {
+    Asset asset = assetService.getOwnedAsset(userId, id);
+    return ResponseEntity.ok(
+        PriceHistoryResponse.from(
+            asset.getCurrency(),
+            priceHistoryQueryService.getHistory(asset.getType(), asset.getSymbol())));
+  }
+
   /**
    * 표시 이름과 통화를 수정한다.
    *
@@ -99,6 +130,19 @@ public class AssetController {
       @PathVariable Long id,
       @Valid @RequestBody AssetUpdateRequest request) {
     return ResponseEntity.ok(assetService.update(userId, id, request));
+  }
+
+  /** 최초 등록 수량 오입력을 현재 실제 보유 수량 기준으로 정정한다. */
+  @Operation(
+      summary = "보유 수량 정정",
+      description =
+          "STOCK/CRYPTO의 최초 등록 수량 오입력을 정정한다. 매도·정산 이벤트를 만들지 않고 기존 거래를 다시 계산한다.")
+  @PatchMapping("/{id}/quantity")
+  public ResponseEntity<AssetResponse> correctQuantity(
+      @CurrentUserId Long userId,
+      @PathVariable Long id,
+      @Valid @RequestBody AssetQuantityCorrectionRequest request) {
+    return ResponseEntity.ok(assetService.correctQuantity(userId, id, request.quantity()));
   }
 
   /**
@@ -140,7 +184,7 @@ public class AssetController {
    * @param request 새 환율
    * @return 갱신된 자산 정보
    */
-  @Operation(summary = "환율 갱신", description = "해외주식의 환율은 MVP 에서 수동 입력이다. Transaction 을 만들지 않는다.")
+  @Operation(summary = "환율 수동 보정", description = "자동 환율이 부정확하거나 과거 값을 직접 보정할 때 사용한다. Transaction 을 만들지 않는다.")
   @PatchMapping("/{id}/exchange-rate")
   public ResponseEntity<AssetResponse> updateExchangeRate(
       @CurrentUserId Long userId,

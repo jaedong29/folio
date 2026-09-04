@@ -4,13 +4,20 @@ import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.exception.InsufficientAssetQuantityException;
 import com.assetdashboard.domain.asset.service.AssetService;
 import com.assetdashboard.domain.transaction.dto.CashFlowRequest;
+import com.assetdashboard.domain.transaction.dto.ExchangeRateMode;
 import com.assetdashboard.domain.transaction.dto.TradeRequest;
 import com.assetdashboard.domain.transaction.dto.TransactionHistoryResponse;
 import com.assetdashboard.domain.transaction.dto.TransactionResponse;
 import com.assetdashboard.domain.transaction.entity.Transaction;
+import com.assetdashboard.domain.transaction.entity.TransactionType;
+import com.assetdashboard.domain.transaction.exception.InsufficientSettlementFundsException;
 import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +39,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class TransactionService {
 
+  private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
   private final TransactionRepository transactionRepository;
   private final AssetService assetService;
 
@@ -48,15 +57,23 @@ public class TransactionService {
   @Transactional
   public TransactionResponse buy(Long userId, Long assetId, TradeRequest request) {
     Asset asset = assetService.getOwnedAsset(userId, assetId);
+    Asset settlementAsset =
+        resolveSettlementAsset(userId, asset, request.settlementAssetId());
+    BigDecimal exchangeRate =
+        resolveExchangeRate(
+            asset, request.exchangeRate(), request.exchangeRateMode(), request.tradedAt());
+    BigDecimal settlementAmount = request.quantity().multiply(request.price());
     Transaction tx =
         Transaction.createBuy(
             assetId,
             request.quantity(),
             request.price(),
-            request.exchangeRate(),
+            exchangeRate,
+            request.settlementAssetId(),
+            settlementAmount,
             request.memo(),
             request.tradedAt());
-    return apply(asset, tx);
+    return applyTrade(asset, settlementAsset, tx);
   }
 
   /**
@@ -71,15 +88,23 @@ public class TransactionService {
   @Transactional
   public TransactionResponse sell(Long userId, Long assetId, TradeRequest request) {
     Asset asset = assetService.getOwnedAsset(userId, assetId);
+    Asset settlementAsset =
+        resolveSettlementAsset(userId, asset, request.settlementAssetId());
+    BigDecimal exchangeRate =
+        resolveExchangeRate(
+            asset, request.exchangeRate(), request.exchangeRateMode(), request.tradedAt());
+    BigDecimal settlementAmount = request.quantity().multiply(request.price());
     Transaction tx =
         Transaction.createSell(
             assetId,
             request.quantity(),
             request.price(),
-            request.exchangeRate(),
+            exchangeRate,
+            request.settlementAssetId(),
+            settlementAmount,
             request.memo(),
             request.tradedAt());
-    return apply(asset, tx);
+    return applyTrade(asset, settlementAsset, tx);
   }
 
   /**
@@ -94,8 +119,12 @@ public class TransactionService {
   @Transactional
   public TransactionResponse deposit(Long userId, Long assetId, CashFlowRequest request) {
     Asset asset = assetService.getOwnedAsset(userId, assetId);
+    BigDecimal exchangeRate =
+        resolveExchangeRate(
+            asset, request.exchangeRate(), request.exchangeRateMode(), request.tradedAt());
     Transaction tx =
-        Transaction.createDeposit(assetId, request.quantity(), request.memo(), request.tradedAt());
+        Transaction.createDeposit(
+            assetId, request.quantity(), exchangeRate, request.memo(), request.tradedAt());
     return apply(asset, tx);
   }
 
@@ -111,8 +140,12 @@ public class TransactionService {
   @Transactional
   public TransactionResponse withdraw(Long userId, Long assetId, CashFlowRequest request) {
     Asset asset = assetService.getOwnedAsset(userId, assetId);
+    BigDecimal exchangeRate =
+        resolveExchangeRate(
+            asset, request.exchangeRate(), request.exchangeRateMode(), request.tradedAt());
     Transaction tx =
-        Transaction.createWithdraw(assetId, request.quantity(), request.memo(), request.tradedAt());
+        Transaction.createWithdraw(
+            assetId, request.quantity(), exchangeRate, request.memo(), request.tradedAt());
     return apply(asset, tx);
   }
 
@@ -146,6 +179,12 @@ public class TransactionService {
         transactionRepository
             .findByIdAndAssetId(transactionId, assetId)
             .orElseThrow(() -> new BusinessException(ErrorCode.TRANSACTION_NOT_FOUND));
+
+    if (target.getSettlementAssetId() != null) {
+      Asset settlementAsset =
+          assetService.getOwnedAsset(userId, target.getSettlementAssetId());
+      reverseSettlement(settlementAsset, target);
+    }
 
     transactionRepository.delete(target);
     // 삭제를 DB 에 먼저 반영해야 이어지는 조회가 "남은 이력"을 정확히 돌려준다.
@@ -233,5 +272,124 @@ public class TransactionService {
     }
     // asset 은 영속 상태이므로 더티 체킹으로 UPDATE 된다. 명시적 save() 는 불필요하다.
     return TransactionResponse.from(tx, asset);
+  }
+
+  /**
+   * 투자 거래와 대응 투자 대기자금 이동을 같은 DB 트랜잭션에서 반영한다.
+   *
+   * @param asset 매매 대상 투자 자산
+   * @param settlementAsset 정산할 현금성 자산
+   * @param tx 매수 또는 매도 이벤트
+   * @return 거래 응답
+   */
+  private TransactionResponse applyTrade(
+      Asset asset, Asset settlementAsset, Transaction tx) {
+    if (tx.getType() == TransactionType.BUY) {
+      ensureSettlementFunds(settlementAsset, tx.getSettlementAmount());
+    }
+    boolean insertedInMiddle =
+        transactionRepository.existsByAssetIdAndTradedAtGreaterThan(
+            asset.getId(), tx.getTradedAt());
+
+    if (insertedInMiddle) {
+      applySettlement(settlementAsset, tx);
+      transactionRepository.save(tx);
+      transactionRepository.flush();
+      asset.replay(transactionRepository.findAllByAssetIdOrderByTradedAtAscIdAsc(asset.getId()));
+      log.info("[Transaction] 과거 매매 입력 — 이력 전체 재계산 assetId={} txId={}", asset.getId(), tx.getId());
+    } else {
+      asset.applyTransaction(tx);
+      applySettlement(settlementAsset, tx);
+      transactionRepository.save(tx);
+    }
+    return TransactionResponse.from(tx, asset);
+  }
+
+  private Asset resolveSettlementAsset(Long userId, Asset investment, Long settlementAssetId) {
+    if (settlementAssetId == null) {
+      throw new BusinessException(ErrorCode.INVALID_INPUT, "매매대금을 정산할 투자 대기자금을 선택해주세요.");
+    }
+    Asset settlement = assetService.getOwnedAsset(userId, settlementAssetId);
+    if (!settlement.getType().isCashLike()) {
+      throw new BusinessException(ErrorCode.INVALID_INPUT, "매매 정산 자산은 CASH 또는 BANK여야 합니다.");
+    }
+    if (!investment.getCurrency().equalsIgnoreCase(settlement.getCurrency())) {
+      throw new BusinessException(
+          ErrorCode.SETTLEMENT_CURRENCY_MISMATCH,
+          "매매 자산과 정산 자산의 통화가 같아야 합니다. (%s / %s)"
+              .formatted(investment.getCurrency(), settlement.getCurrency()));
+    }
+    return settlement;
+  }
+
+  private BigDecimal resolveExchangeRate(
+      Asset asset,
+      BigDecimal requestedRate,
+      ExchangeRateMode requestedMode,
+      LocalDateTime tradedAt) {
+    if ("KRW".equalsIgnoreCase(asset.getCurrency())) {
+      return BigDecimal.ONE;
+    }
+
+    ExchangeRateMode mode = ExchangeRateMode.defaultIfNull(requestedMode);
+    boolean historical = tradedAt.toLocalDate().isBefore(LocalDate.now(KST));
+
+    if (mode == ExchangeRateMode.MANUAL) {
+      if (requestedRate == null) {
+        throw new BusinessException(
+            ErrorCode.INVALID_INPUT, "수동 환율을 선택했다면 거래 시점 환율을 입력해주세요.");
+      }
+      return requestedRate;
+    }
+
+    if (historical) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "과거 외화 거래는 당시 환율을 직접 입력해주세요.");
+    }
+    if (requestedRate != null) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "자동 환율을 사용할 때는 exchangeRate를 보내지 마세요.");
+    }
+
+    BigDecimal currentRate = asset.getCurrentExchangeRate();
+    if (currentRate == null) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT,
+          "현재 환율을 확보하지 못했습니다. 환율을 직접 입력하고 MANUAL을 선택해주세요.");
+    }
+    return currentRate;
+  }
+
+  private void applySettlement(Asset settlementAsset, Transaction tx) {
+    if (tx.getSettlementAmount() == null) {
+      return;
+    }
+    switch (tx.getType()) {
+      case BUY -> settlementAsset.withdraw(tx.getSettlementAmount());
+      case SELL -> settlementAsset.deposit(tx.getSettlementAmount());
+      default -> throw new BusinessException(ErrorCode.INVALID_INPUT, "매수·매도만 현금 정산할 수 있습니다.");
+    }
+  }
+
+  private void ensureSettlementFunds(Asset settlementAsset, BigDecimal requestedAmount) {
+    if (settlementAsset.getQuantity().compareTo(requestedAmount) < 0) {
+      throw new InsufficientSettlementFundsException(settlementAsset, requestedAmount);
+    }
+  }
+
+  private void reverseSettlement(Asset settlementAsset, Transaction tx) {
+    if (tx.getSettlementAmount() == null) {
+      return;
+    }
+    switch (tx.getType()) {
+      case BUY -> settlementAsset.deposit(tx.getSettlementAmount());
+      case SELL -> {
+        // 매도 삭제는 과거에 입금된 매도대금을 다시 빼는 정산 출금이다. 사용자가 그 돈을 이미
+        // 출금했다면 일반 자산 수량 부족이 아니라 정산 대기자금 부족으로 분류해야 한다.
+        ensureSettlementFunds(settlementAsset, tx.getSettlementAmount());
+        settlementAsset.withdraw(tx.getSettlementAmount());
+      }
+      default -> throw new BusinessException(ErrorCode.INVALID_INPUT, "매수·매도 정산만 되돌릴 수 있습니다.");
+    }
   }
 }

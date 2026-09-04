@@ -32,7 +32,15 @@ public class JwtTokenProvider {
    * @param properties JWT 설정
    */
   public JwtTokenProvider(JwtProperties properties) {
-    this.key = Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
+    String secret = properties.secret();
+    if (secret == null || secret.isBlank()) {
+      throw new IllegalStateException("APP_JWT_SECRET must be configured before the application starts.");
+    }
+    byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+    if (secretBytes.length < 32) {
+      throw new IllegalStateException("APP_JWT_SECRET must be at least 32 bytes long.");
+    }
+    this.key = Keys.hmacShaKeyFor(secretBytes);
     this.expiration = Duration.ofMinutes(properties.expirationMinutes());
   }
 

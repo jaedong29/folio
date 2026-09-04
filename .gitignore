@@ -35,3 +35,12 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# AWS deployment secrets
+/deploy/aws/.env
+# Local/provider secrets
+.env
+.env.*
+!.env.example
+# AWS deployment database backups
+/deploy/aws/backups/

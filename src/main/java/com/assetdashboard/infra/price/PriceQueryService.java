@@ -46,9 +46,20 @@ public class PriceQueryService {
    *     {@code assets.current_price} 로 폴백하도록 하기 위해 예외를 던지지 않는다
    */
   public Map<SymbolKey, PriceQuote> getPrices(Set<SymbolKey> keys) {
+    return getPrices(keys, false);
+  }
+
+  /**
+   * 여러 심볼의 시세를 조회한다.
+   *
+   * @param keys 조회할 심볼 키 집합
+   * @param force true 면 TTL 안의 캐시도 건너뛰고 외부 조회를 시도한다
+   * @return 사용 가능한 시세 Map
+   */
+  public Map<SymbolKey, PriceQuote> getPrices(Set<SymbolKey> keys, boolean force) {
     Map<SymbolKey, PriceQuote> result = new HashMap<>();
     for (SymbolKey key : keys) {
-      fetchWithFallback(key).ifPresent(quote -> result.put(key, quote));
+      fetchWithFallback(key, force).ifPresent(quote -> result.put(key, quote));
     }
     return result;
   }
@@ -60,6 +71,20 @@ public class PriceQueryService {
    * @return 사용 가능한 시세. 캐시에도 없고 조회도 실패하면 빈 Optional
    */
   public Optional<PriceQuote> fetchWithFallback(SymbolKey key) {
+    return fetchWithFallback(key, false);
+  }
+
+  /**
+   * 캐시 정책을 적용해 시세 하나를 조회한다.
+   *
+   * @param key 조회할 심볼 키
+   * @param force true 면 첫 캐시 확인을 건너뛰고 외부 조회를 시도한다
+   * @return 사용 가능한 시세. 외부 조회 실패 시 마지막 캐시값으로 폴백
+   */
+  public Optional<PriceQuote> fetchWithFallback(SymbolKey key, boolean force) {
+    if (force) {
+      return fetchForcedWithFallback(key);
+    }
     Optional<PriceQuote> fresh = priceCache.getFresh(key);
     if (fresh.isPresent()) {
       return fresh;
@@ -79,6 +104,23 @@ public class PriceQueryService {
       } catch (PriceProviderException e) {
         // 실패해도 예외를 전파하지 않는다. 만료된 캐시값이라도 있으면 그것을 쓴다.
         log.warn("[Price] 조회 실패 {} — 폴백 시도: {}", key, e.getMessage());
+        return priceCache.getAny(key);
+      } finally {
+        inFlightLocks.remove(key, lock);
+      }
+    }
+  }
+
+  /** 강제 갱신은 심볼 락 안에서 외부 조회해 같은 심볼의 동시 요청을 직렬화한다. */
+  private Optional<PriceQuote> fetchForcedWithFallback(SymbolKey key) {
+    Object lock = inFlightLocks.computeIfAbsent(key, k -> new Object());
+    synchronized (lock) {
+      try {
+        PriceQuote quote = fetchFromProvider(key);
+        priceCache.put(key, quote);
+        return Optional.of(quote);
+      } catch (PriceProviderException e) {
+        log.warn("[Price] 강제 조회 실패 {} — 마지막 캐시값으로 폴백: {}", key, e.getMessage());
         return priceCache.getAny(key);
       } finally {
         inFlightLocks.remove(key, lock);

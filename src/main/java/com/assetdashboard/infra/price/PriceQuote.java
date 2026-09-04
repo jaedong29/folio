@@ -6,9 +6,8 @@ import java.time.LocalDateTime;
 /**
  * 외부에서 조회한 시세 한 건.
  *
- * <p>{@code exchangeRate} 는 <b>조회처가 환율까지 알고 있는 경우에만</b> 채워진다. CRYPTO 는 Upbit 의
- * KRW-USDT 마켓에서 환율을 함께 얻으므로 값이 들어가고, STOCK 은 환율이 수동 입력이라 항상 {@code null} 이다
- * (Roadmap 7-2).
+ * <p>{@code exchangeRate} 는 <b>조회처가 환율까지 알고 있는 경우에만</b> 채워진다. 시세 제공자가 환율을 주지 않는
+ * STOCK 은 {@code null} 이며, 별도의 환율 조회 서비스가 Yahoo Finance의 USD/KRW를 적용한다.
  *
  * @param price 원래 통화 기준 현재가
  * @param exchangeRate 원/통화 환율. 조회처가 제공하지 않으면 null

@@ -6,9 +6,9 @@ import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
 
 /**
- * 환율 수동 갱신 요청 (PRD 4-2).
+ * 환율 수동 보정 요청 (PRD 4-2).
  *
- * <p>해외주식의 환율은 MVP 에서 수동 입력이다(CRYPTO 는 Upbit 로 자동 조회).
+ * <p>평상시에는 USD/KRW와 USDT/KRW를 자동 조회한다. 이 요청은 외부 조회 실패나 과거 값 보정용 폴백이다.
  *
  * @param exchangeRate 원/통화 환율
  */

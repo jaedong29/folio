@@ -2,9 +2,13 @@ package com.assetdashboard.domain.asset.repository;
 
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.entity.AssetType;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Asset 영속성 접근.
@@ -14,6 +18,19 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * 불가능</b>하게 만든다(PRD 4-0 규칙 2). {@code findById} 는 사용하지 않는다.
  */
 public interface AssetRepository extends JpaRepository<Asset, Long> {
+
+  /**
+   * 시세 반영 대상 자산을 행 잠금과 함께 조회한다.
+   *
+   * <p>Dashboard와 Portfolio가 동시에 같은 시세를 반영하더라도 한 요청씩 짧게 적용하게 해 {@code @Version}
+   * 충돌을 피한다. 외부 HTTP 호출은 이 메서드 호출 전에 끝나므로 잠금이 네트워크 대기를 포함하지 않는다.
+   *
+   * @param ids 시세 반영 대상 자산 id
+   * @return 행 잠금이 걸린 자산 목록
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select a from Asset a where a.id in :ids")
+  List<Asset> findAllByIdForUpdate(@Param("ids") List<Long> ids);
 
   /**
    * 내 자산 한 건을 조회한다. 삭제된 자산은 없는 것으로 취급한다.

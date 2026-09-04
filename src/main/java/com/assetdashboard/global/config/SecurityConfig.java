@@ -30,6 +30,8 @@ public class SecurityConfig {
   private static final String[] PUBLIC_ENDPOINTS = {
     "/api/auth/signup",
     "/api/auth/login",
+    "/api/auth/email-availability",
+    "/actuator/health",
     "/v3/api-docs/**",
     "/swagger-ui/**",
     "/swagger-ui.html",
@@ -37,7 +39,7 @@ public class SecurityConfig {
   };
 
   private static final String[] STATIC_RESOURCES = {
-    "/", "/index.html", "/login.html", "/css/**", "/js/**", "/favicon.ico"
+    "/", "/index.html", "/login.html", "/css/**", "/js/**", "/data/**", "/favicon.ico"
   };
 
   private final JwtAuthenticationFilter jwtAuthenticationFilter;

@@ -12,17 +12,25 @@ import java.math.BigDecimal;
  */
 public class InsufficientAssetQuantityException extends BusinessException {
 
-  /**
-   * 보유 수량과 요청 수량을 메시지에 담아 예외를 생성한다.
-   *
-   * @param owned 현재 보유 수량
-   * @param requested 요청한 수량
-   */
-  public InsufficientAssetQuantityException(BigDecimal owned, BigDecimal requested) {
-    super(
-        ErrorCode.INSUFFICIENT_ASSET_QUANTITY,
-        "보유 수량이 부족합니다. (보유: %s, 요청: %s)"
-            .formatted(owned.stripTrailingZeros().toPlainString(),
-                requested.stripTrailingZeros().toPlainString()));
+  public static InsufficientAssetQuantityException forPosition(
+      String name, String symbol, BigDecimal owned, BigDecimal requested) {
+    return new InsufficientAssetQuantityException(
+        "%s(%s) 보유 수량이 부족합니다. (보유: %s %s, 요청: %s %s)"
+            .formatted(name, symbol, format(owned), symbol, format(requested), symbol));
+  }
+
+  public static InsufficientAssetQuantityException forCashBalance(
+      String name, String currency, BigDecimal owned, BigDecimal requested) {
+    return new InsufficientAssetQuantityException(
+        "%s(%s) 잔액이 부족합니다. (보유: %s %s, 요청: %s %s)"
+            .formatted(name, currency, format(owned), currency, format(requested), currency));
+  }
+
+  private InsufficientAssetQuantityException(String message) {
+    super(ErrorCode.INSUFFICIENT_ASSET_QUANTITY, message);
+  }
+
+  private static String format(BigDecimal value) {
+    return value.stripTrailingZeros().toPlainString();
   }
 }

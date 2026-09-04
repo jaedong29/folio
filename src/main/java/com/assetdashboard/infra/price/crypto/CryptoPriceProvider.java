@@ -4,6 +4,8 @@ import com.assetdashboard.domain.asset.entity.AssetType;
 import com.assetdashboard.infra.price.PriceProvider;
 import com.assetdashboard.infra.price.PriceProviderException;
 import com.assetdashboard.infra.price.PriceQuote;
+import com.assetdashboard.infra.price.fx.FxRateQueryService;
+import com.assetdashboard.infra.price.fx.FxRateQuote;
 import java.math.BigDecimal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -23,7 +25,7 @@ import org.springframework.stereotype.Component;
 public class CryptoPriceProvider implements PriceProvider {
 
   private final BinanceClient binanceClient;
-  private final UpbitExchangeRateClient upbitExchangeRateClient;
+  private final FxRateQueryService fxRateQueryService;
 
   @Override
   public boolean supports(AssetType type) {
@@ -33,9 +35,16 @@ public class CryptoPriceProvider implements PriceProvider {
   @Override
   public PriceQuote fetchPrice(String symbol) {
     BigDecimal usdtPrice = binanceClient.fetchUsdtPrice(symbol);
-    BigDecimal krwPerUsdt = upbitExchangeRateClient.fetchKrwPerUsdt();
+    FxRateQuote usdtRate =
+        fxRateQueryService
+            .fetchWithFallback("USDT", false)
+            .orElseThrow(
+                () ->
+                    new PriceProviderException(
+                        PriceProviderException.Kind.PROVIDER_UNAVAILABLE,
+                        "USDT/KRW 환율을 확보하지 못했습니다."));
     // 가격은 원래 통화(USDT) 기준으로 두고 환율을 함께 돌려준다.
     // 평가금액 = quantity × price × exchangeRate 라는 공통 공식이 그대로 성립한다.
-    return PriceQuote.of(usdtPrice, krwPerUsdt);
+    return new PriceQuote(usdtPrice, usdtRate.krwRate(), usdtRate.fetchedAt());
   }
 }

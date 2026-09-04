@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
  * @param quantity 수량
  * @param price 단가 (입출금은 null)
  * @param exchangeRate 거래 시점 환율 (입출금은 null)
+ * @param settlementAssetId 매매 대금을 주고받은 투자 대기자금 id
+ * @param settlementAmount 정산된 원래 통화 금액
  * @param memo 메모
  * @param tradedAt 거래 시점
  */
@@ -22,6 +24,8 @@ public record TransactionHistoryResponse(
     BigDecimal quantity,
     BigDecimal price,
     BigDecimal exchangeRate,
+    Long settlementAssetId,
+    BigDecimal settlementAmount,
     String memo,
     LocalDateTime tradedAt) {
 
@@ -38,6 +42,8 @@ public record TransactionHistoryResponse(
         tx.getQuantity(),
         tx.getPrice(),
         tx.getExchangeRate(),
+        tx.getSettlementAssetId(),
+        tx.getSettlementAmount(),
         tx.getMemo(),
         tx.getTradedAt());
   }

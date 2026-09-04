@@ -4,8 +4,11 @@ import com.assetdashboard.domain.transaction.entity.Transaction;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Transaction 영속성 접근.
@@ -20,6 +23,23 @@ import org.springframework.data.jpa.repository.JpaRepository;
  */
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
+  /** 여러 자산에 속한 거래를 계정 탈퇴 전에 삭제한다.
+   *
+   * @param assetIds 삭제할 자산 id 목록
+   */
+  void deleteAllByAssetIdIn(List<Long> assetIds);
+
+  /**
+   * 특정 자산에 거래가 한 건이라도 있는지 확인한다.
+   *
+   * <p>삭제했던 자산을 재등록할 때 새 최초 보유상태를 적용해도 되는지 판정하는 데 사용한다. 거래가 이미 있으면
+   * 최초 상태만 덮어쓸 경우 이력과 현재 Position이 어긋나므로 기존 상태를 그대로 복구해야 한다.
+   *
+   * @param assetId 자산 id
+   * @return 거래가 하나 이상 있으면 true
+   */
+  boolean existsByAssetId(Long assetId);
+
   /**
    * 특정 자산의 거래 내역을 최신순으로 조회한다.
    *
@@ -27,6 +47,16 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
    * @return 거래 목록 (tradedAt 내림차순)
    */
   List<Transaction> findAllByAssetIdOrderByTradedAtDescIdDesc(Long assetId);
+
+  /**
+   * Agent 근거 응답에 포함할 최근 거래를 제한된 크기로 조회한다.
+   *
+   * @param assetId 자산 id (소유권이 이미 검증된 값)
+   * @param pageable 페이지와 최대 건수
+   * @return 최근 거래 페이지와 전체 거래 건수
+   */
+  Page<Transaction> findAllByAssetIdOrderByTradedAtDescIdDesc(
+      Long assetId, Pageable pageable);
 
   /**
    * 특정 자산의 거래 내역을 <b>거래 시점 오름차순</b>으로 조회한다.
@@ -73,4 +103,23 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
    */
   List<Transaction> findAllByAssetIdInOrderByTradedAtDescIdDesc(
       List<Long> assetIds, Pageable pageable);
+
+  /**
+   * 지정 구간의 외부 입출금만 조회한다. BUY/SELL은 Portfolio 내부 이동이므로 제외한다.
+   *
+   * @param assetIds 사용자의 자산 id 목록
+   * @param from 기준 Snapshot 시각
+   * @param to 현재 계산 시각
+   * @return DEPOSIT/WITHDRAW 이벤트
+   */
+  @Query(
+      "select t from Transaction t "
+          + "where t.assetId in :assetIds "
+          + "and t.type in (com.assetdashboard.domain.transaction.entity.TransactionType.DEPOSIT, "
+          + "com.assetdashboard.domain.transaction.entity.TransactionType.WITHDRAW) "
+          + "and t.tradedAt > :from and t.tradedAt <= :to")
+  List<Transaction> findExternalFlows(
+      @Param("assetIds") List<Long> assetIds,
+      @Param("from") LocalDateTime from,
+      @Param("to") LocalDateTime to);
 }

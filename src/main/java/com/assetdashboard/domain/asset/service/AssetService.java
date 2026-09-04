@@ -9,7 +9,9 @@ import com.assetdashboard.domain.asset.dto.PortfolioResponse;
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.entity.AssetSource;
 import com.assetdashboard.domain.asset.entity.AssetType;
+import com.assetdashboard.domain.asset.entity.StockMarket;
 import com.assetdashboard.domain.asset.repository.AssetRepository;
+import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
 import com.assetdashboard.infra.price.PriceProperties;
@@ -17,6 +19,8 @@ import com.assetdashboard.infra.price.PriceProviderException;
 import com.assetdashboard.infra.price.PriceQueryService;
 import com.assetdashboard.infra.price.PriceQuote;
 import com.assetdashboard.infra.price.SymbolKey;
+import com.assetdashboard.infra.price.fx.FxRateQueryService;
+import com.assetdashboard.infra.price.fx.FxRateQuote;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
@@ -33,7 +37,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 자산의 등록·조회·수정·삭제와 시세/환율 수동 갱신을 담당한다.
+ * 자산의 등록·조회·수정·삭제와 시세/환율 갱신을 담당한다.
  *
  * <p>모든 단건 접근은 {@code findByIdAndUserIdAndDeletedAtIsNull} 을 통하므로, 소유권 검증을 빠뜨린 경로가
  * 존재할 수 없다(PRD 4-0 규칙 2). 상태 변경은 전부 Asset 의 도메인 메서드에 위임하고 이 클래스는 필드를 직접
@@ -55,10 +59,13 @@ public class AssetService {
   private static final int RATIO_SCALE = 2;
 
   private final AssetRepository assetRepository;
+  private final TransactionRepository transactionRepository;
   private final PriceProperties priceProperties;
   private final PriceQueryService priceQueryService;
   private final PriceRefreshService priceRefreshService;
   private final AssetRegistrar assetRegistrar;
+  private final FxRateQueryService fxRateQueryService;
+  private final DefaultSettlementAssetProvisioner defaultSettlementAssetProvisioner;
 
   /**
    * 자산을 등록한다.
@@ -80,6 +87,8 @@ public class AssetService {
    *     않는 심볼이면 {@code INVALID_SYMBOL}
    */
   public AssetCreationResult create(Long userId, AssetCreateRequest request) {
+    validateStockMarket(request);
+    validateCurrencyAndOpeningPosition(request);
     String symbol = request.normalizedSymbol();
 
     // 1) 중복 확인을 먼저 한다. 어차피 거부할 요청에 외부 API 호출을 낭비하지 않기 위해서다.
@@ -87,14 +96,111 @@ public class AssetService {
         assetRepository.findByUserIdAndTypeAndSymbol(userId, request.type(), symbol);
     if (existing.isPresent() && !existing.get().isDeleted()) {
       throw new BusinessException(
-          ErrorCode.DUPLICATE_ASSET, "이미 등록된 자산입니다. (%s / %s)".formatted(request.type(), symbol));
+          ErrorCode.DUPLICATE_ASSET,
+          "이미 등록된 자산입니다. 자산 카드를 클릭해 보유 수량을 정정하거나 거래를 기록해주세요. (%s / %s)"
+              .formatted(request.type(), symbol));
     }
 
     // 2) 심볼 검증 — 트랜잭션 밖에서 수행한다.
     PriceQuote initialQuote = validateSymbolAndFetchQuote(request.type(), symbol);
+    FxRateQuote initialRate =
+        fxRateQueryService
+            .fetchWithFallback(request.normalizedCurrency(), false)
+            .orElse(null);
 
     // 3) 저장 — 여기서부터만 트랜잭션이다. 별도 빈을 거쳐야 프록시가 적용된다.
-    return assetRegistrar.persist(userId, request, symbol, initialQuote);
+    return assetRegistrar.persist(userId, request, symbol, initialQuote, initialRate);
+  }
+
+  /**
+   * 자산 종류별 기준 통화와 초기 보유상태 입력 조합을 검증한다.
+   *
+   * @param request 자산 등록 요청
+   * @throws BusinessException 지원하지 않는 통화이거나 평단 입력 조합이 올바르지 않은 경우
+   */
+  private void validateCurrencyAndOpeningPosition(AssetCreateRequest request) {
+    String currency = request.normalizedCurrency();
+    String symbol = request.normalizedSymbol();
+
+    if (request.type() == AssetType.CRYPTO && !"USDT".equals(currency)) {
+      throw new BusinessException(ErrorCode.INVALID_INPUT, "암호화폐는 Binance Spot의 USDT 기준으로 등록합니다.");
+    }
+    if (request.type() == AssetType.STOCK) {
+      boolean domestic = symbol.endsWith(".KS") || symbol.endsWith(".KQ");
+      String expected = domestic ? "KRW" : "USD";
+      if (!expected.equals(currency)) {
+        throw new BusinessException(
+            ErrorCode.INVALID_INPUT,
+            "%s 주식의 기준 통화는 %s입니다.".formatted(domestic ? "국내" : "해외", expected));
+      }
+    }
+    if (request.type().isCashLike()
+        && !List.of("KRW", "USD", "USDT").contains(currency)) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "투자 대기자금은 KRW, USD, USDT 중 하나로 등록해주세요.");
+    }
+
+    if (request.averagePrice() == null && request.averageExchangeRate() != null) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "평균 매입 환율은 평균 매입 단가를 입력할 때만 사용할 수 있습니다.");
+    }
+    if (request.averagePrice() != null
+        && request.initialQuantity().compareTo(BigDecimal.ZERO) == 0) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "평균 매입 단가를 입력하려면 현재 보유 수량도 입력해주세요.");
+    }
+    if (request.type().isCashLike() && request.averagePrice() != null) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "투자 대기자금에는 평균 매입 단가를 입력하지 않습니다.");
+    }
+    if (request.averagePrice() != null
+        && !"KRW".equals(currency)
+        && request.averageExchangeRate() == null) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "외화 자산의 평단을 입력할 때는 매수 당시 환율도 입력해주세요.");
+    }
+  }
+
+  /**
+   * 주식 종목코드와 시장 조합을 검증한다.
+   *
+   * <p>기존 API 사용자를 위해 이미 {@code 000660.KS} 형태로 전달된 심볼도 계속 허용한다. 새 화면은 시장과
+   * 종목코드를 분리해 전달하며, 이 메서드에서 Yahoo Finance용 심볼 조합은 요청 DTO가 담당한다.
+   *
+   * @param request 자산 등록 요청
+   * @throws BusinessException 국내 종목코드에 시장이 없거나 입력 조합이 맞지 않으면 {@code INVALID_INPUT}
+   */
+  private void validateStockMarket(AssetCreateRequest request) {
+    if (request.type() != AssetType.STOCK) {
+      return;
+    }
+
+    String input = request.symbol().trim().toUpperCase();
+    boolean domesticCode = input.matches("\\d{6}");
+    boolean providerDomesticCode = input.matches("\\d{6}\\.(KS|KQ)");
+
+    if (domesticCode && request.market() == null) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "국내 주식은 KOSPI 또는 KOSDAQ 시장을 선택해주세요.");
+    }
+    if (domesticCode && request.market() == StockMarket.OVERSEAS) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "국내 종목코드에는 KOSPI 또는 KOSDAQ 시장을 선택해주세요.");
+    }
+    if (providerDomesticCode
+        && request.market() != null
+        && request.market() != StockMarket.OVERSEAS
+        && !input.endsWith(request.market().yahooSuffix())) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "종목코드와 선택한 시장이 일치하지 않습니다.");
+    }
+    if (request.market() != null
+        && request.market() != StockMarket.OVERSEAS
+        && !domesticCode
+        && !providerDomesticCode) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "KOSPI/KOSDAQ은 6자리 종목코드를 입력해주세요.");
+    }
   }
 
   /**
@@ -131,10 +237,18 @@ public class AssetService {
    */
   @Transactional(readOnly = true)
   public List<AssetResponse> getAssets(Long userId) {
+    defaultSettlementAssetProvisioner.ensureDefaults(userId);
     return assetRepository.findAllByUserIdAndDeletedAtIsNull(userId).stream()
         .sorted(Comparator.comparing(Asset::getType).thenComparing(Asset::getName))
         .map(AssetResponse::from)
         .toList();
+  }
+
+  /** 특정 투자 자산 하나의 시세와 환율을 TTL과 무관하게 다시 조회한다. */
+  public AssetResponse refreshAsset(Long userId, Long assetId) {
+    Asset owned = getOwnedAsset(userId, assetId);
+    List<Asset> refreshed = refreshPrices(List.of(owned), true);
+    return AssetResponse.from(refreshed.get(0));
   }
 
   /**
@@ -162,7 +276,40 @@ public class AssetService {
   @Transactional
   public AssetResponse update(Long userId, Long assetId, AssetUpdateRequest request) {
     Asset asset = getOwnedAsset(userId, assetId);
+    if (asset.isDefaultSettlementAsset()
+        && request.currency() != null
+        && !asset.getSymbol().equalsIgnoreCase(request.currency())) {
+      throw new BusinessException(ErrorCode.INVALID_INPUT, "기본 투자 대기자금의 통화는 변경할 수 없습니다.");
+    }
     asset.updateDisplayInfo(request.name(), request.currency());
+    return AssetResponse.from(asset);
+  }
+
+  /**
+   * 사용자가 잘못 입력한 최초 보유 수량을 현재 실제 수량 기준으로 정정하고 기존 거래를 다시 계산한다.
+   *
+   * <p>거래 이벤트를 추가하지 않으므로 실현손익과 정산 대기자금을 인위적으로 움직이지 않는다. 다만 기존 거래가
+   * 있다면 새 최초 수량을 기준으로 평단가·실현손익을 다시 접어 일관성을 유지한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param assetId 정정할 투자 자산 id
+   * @param correctedQuantity 사용자가 확인한 현재 실제 보유 수량
+   * @return 정정 후 자산 상태
+   */
+  @Transactional
+  public AssetResponse correctQuantity(
+      Long userId, Long assetId, BigDecimal correctedQuantity) {
+    Asset asset = getOwnedAsset(userId, assetId);
+    BigDecimal previousQuantity = asset.getQuantity();
+    asset.correctCurrentQuantity(
+        correctedQuantity,
+        transactionRepository.findAllByAssetIdOrderByTradedAtAscIdAsc(assetId));
+    log.info(
+        "[Asset] 보유 수량 정정 assetId={} userId={} quantity={} -> {}",
+        assetId,
+        userId,
+        previousQuantity,
+        asset.getQuantity());
     return AssetResponse.from(asset);
   }
 
@@ -175,7 +322,12 @@ public class AssetService {
    */
   @Transactional
   public void delete(Long userId, Long assetId) {
-    getOwnedAsset(userId, assetId).softDelete();
+    Asset asset = getOwnedAsset(userId, assetId);
+    if (asset.isDefaultSettlementAsset()) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT, "KRW/USD/USDT 기본 대기자금은 삭제할 수 없습니다. 잔액을 0으로 조정해주세요.");
+    }
+    asset.softDelete();
   }
 
   /**
@@ -197,7 +349,7 @@ public class AssetService {
   }
 
   /**
-   * 환율을 수동으로 갱신한다.
+   * 자동 조회된 환율을 사용자가 수동으로 보정한다.
    *
    * @param userId 인증된 사용자 id
    * @param assetId 자산 id
@@ -229,6 +381,20 @@ public class AssetService {
    * @throws BusinessException 투자 자산이 아닌 종류를 지정하면 {@code INVALID_INPUT}
    */
   public List<PortfolioResponse> getPortfolio(Long userId, AssetType type, String sort) {
+    return getPortfolio(userId, type, sort, false);
+  }
+
+  /**
+   * Portfolio 화면용 투자 자산 목록을 조회한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param type 자산 종류 필터
+   * @param sort 정렬 표현식
+   * @param force true 면 시세 TTL과 무관하게 외부 조회를 시도한다
+   * @return 정렬된 Portfolio 목록
+   */
+  public List<PortfolioResponse> getPortfolio(
+      Long userId, AssetType type, String sort, boolean force) {
     if (type != null && !type.isInvestment()) {
       throw new BusinessException(
           ErrorCode.INVALID_INPUT, "Portfolio 는 STOCK/CRYPTO 만 조회할 수 있습니다. (요청: %s)".formatted(type));
@@ -239,7 +405,7 @@ public class AssetService {
     List<Asset> assets = assetRepository.findAllByUserIdAndTypeInAndDeletedAtIsNull(userId, types);
 
     // 2) [TX 밖] 시세 갱신 — 외부 HTTP 호출은 반드시 트랜잭션 밖에서.
-    List<Asset> refreshed = refreshPrices(assets);
+    List<Asset> refreshed = refreshPrices(assets, force);
 
     List<PortfolioResponse> items =
         refreshed.stream()
@@ -270,14 +436,25 @@ public class AssetService {
    * @return 갱신이 반영된 자산 목록. 갱신할 것이 없으면 입력을 그대로 반환
    */
   private List<Asset> refreshPrices(List<Asset> assets) {
+    return refreshPrices(assets, false);
+  }
+
+  private List<Asset> refreshPrices(List<Asset> assets, boolean force) {
     long ttl = priceProperties.cacheTtlMinutes();
+    Set<String> currencies =
+        assets.stream()
+            .map(Asset::getCurrency)
+            .filter(currency -> !"KRW".equalsIgnoreCase(currency))
+            .collect(Collectors.toSet());
+    Map<String, FxRateQuote> rates = fxRateQueryService.getRates(currencies, force);
+
     List<Asset> targets =
         assets.stream()
             .filter(asset -> asset.getType().isInvestment())
-            .filter(asset -> asset.isPriceStale(ttl))
+            .filter(asset -> force || asset.isPriceStale(ttl))
             .toList();
 
-    if (targets.isEmpty()) {
+    if (targets.isEmpty() && rates.isEmpty()) {
       return assets;
     }
 
@@ -286,14 +463,14 @@ public class AssetService {
             .map(asset -> new SymbolKey(asset.getType(), asset.getSymbol()))
             .collect(Collectors.toSet());
 
-    Map<SymbolKey, PriceQuote> quotes = priceQueryService.getPrices(keys);
-    if (quotes.isEmpty()) {
+    Map<SymbolKey, PriceQuote> quotes = priceQueryService.getPrices(keys, force);
+    if (!targets.isEmpty() && quotes.isEmpty()) {
       log.warn("[Price] 갱신 대상 {}건 중 확보한 시세 0건 — 저장된 값으로 폴백", targets.size());
-      return assets;
     }
 
+    // 응답에는 시세 대상이 아닌 CASH/BANK도 포함되어야 하므로 전체 목록을 다시 읽어 반환한다.
     List<Long> ids = assets.stream().map(Asset::getId).toList();
-    return priceRefreshService.applyQuotes(ids, quotes);
+    return priceRefreshService.applyMarketData(ids, quotes, rates, force);
   }
 
   /**
@@ -316,6 +493,7 @@ public class AssetService {
         byType.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
 
     return byType.entrySet().stream()
+        .filter(entry -> entry.getValue().compareTo(BigDecimal.ZERO) > 0)
         .map(
             entry -> {
               BigDecimal ratio =
@@ -352,7 +530,19 @@ public class AssetService {
    * @return 시세가 갱신된 활성 자산 목록
    */
   public List<Asset> getActiveAssetsWithFreshPrice(Long userId) {
-    return refreshPrices(assetRepository.findAllByUserIdAndDeletedAtIsNull(userId));
+    return getActiveAssetsWithFreshPrice(userId, false);
+  }
+
+  /**
+   * Dashboard용 활성 자산을 조회한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param force true 면 시세 TTL과 무관하게 외부 조회를 시도한다
+   * @return 활성 자산
+   */
+  public List<Asset> getActiveAssetsWithFreshPrice(Long userId, boolean force) {
+    defaultSettlementAssetProvisioner.ensureDefaults(userId);
+    return refreshPrices(assetRepository.findAllByUserIdAndDeletedAtIsNull(userId), force);
   }
 
   /**

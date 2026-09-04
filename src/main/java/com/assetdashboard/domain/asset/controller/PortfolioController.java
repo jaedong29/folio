@@ -35,6 +35,7 @@ public class PortfolioController {
    * @param userId 인증된 사용자 id
    * @param type 필터링할 자산 종류. 생략하면 STOCK + CRYPTO 전체
    * @param sort {@code 필드,방향} 형식의 정렬 조건
+   * @param force true 면 캐시 TTL과 무관하게 외부 시세 조회를 시도한다
    * @return 정렬된 Portfolio 목록
    */
   @Operation(
@@ -49,7 +50,10 @@ public class PortfolioController {
           AssetType type,
       @Parameter(description = "정렬 조건. unrealizedPnl / valuationKRW / realizedPnl + asc|desc")
           @RequestParam(required = false, defaultValue = "unrealizedPnl,desc")
-          String sort) {
-    return ResponseEntity.ok(assetService.getPortfolio(userId, type, sort));
+          String sort,
+      @Parameter(description = "true 면 시세 캐시를 건너뛰고 외부 조회")
+          @RequestParam(defaultValue = "false")
+          boolean force) {
+    return ResponseEntity.ok(assetService.getPortfolio(userId, type, sort, force));
   }
 }

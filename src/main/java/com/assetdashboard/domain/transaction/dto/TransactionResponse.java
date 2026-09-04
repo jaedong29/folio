@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
  * @param quantity 거래 수량
  * @param price 거래 단가 (입출금은 null)
  * @param exchangeRate 거래 시점 환율 (입출금은 null)
+ * @param settlementAssetId 매수·매도 대금을 주고받은 투자 대기자금 id
+ * @param settlementAmount 정산된 원래 통화 금액
  * @param memo 메모
  * @param tradedAt 거래 시점
  * @param asset 거래 반영 후의 자산 상태
@@ -27,6 +29,8 @@ public record TransactionResponse(
     BigDecimal quantity,
     BigDecimal price,
     BigDecimal exchangeRate,
+    Long settlementAssetId,
+    BigDecimal settlementAmount,
     String memo,
     LocalDateTime tradedAt,
     AssetSnapshot asset) {
@@ -80,6 +84,8 @@ public record TransactionResponse(
         tx.getQuantity(),
         tx.getPrice(),
         tx.getExchangeRate(),
+        tx.getSettlementAssetId(),
+        tx.getSettlementAmount(),
         tx.getMemo(),
         tx.getTradedAt(),
         AssetSnapshot.from(asset));

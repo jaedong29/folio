@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -55,6 +56,10 @@ public class Asset extends BaseTimeEntity {
   /** 수익률(%)의 소수 자릿수. */
   private static final int RATE_SCALE = 2;
 
+  /** 매매 정산을 위해 모든 사용자에게 자동으로 제공하는 통화. */
+  private static final Set<String> DEFAULT_SETTLEMENT_CURRENCIES =
+      Set.of("KRW", "USD", "USDT");
+
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
@@ -78,9 +83,34 @@ public class Asset extends BaseTimeEntity {
   @Column(nullable = false, precision = 20, scale = 8)
   private BigDecimal quantity;
 
+  /**
+   * 서비스를 처음 사용하기 시작했을 때 입력한 보유 수량.
+   *
+   * <p>이 값은 Transaction 이 아니다. 사용자가 과거 거래를 전부 복원하지 않아도 현재 Position 에서 시작할 수
+   * 있게 하며, 거래 삭제 후 {@link #replay(List)} 할 때의 기준 상태로 사용한다.
+   */
+  @Column(name = "initial_quantity", precision = 20, scale = 8)
+  private BigDecimal initialQuantity;
+
+  /** 마지막 최초 보유 수량 정정 시각. 당일 손익에서 데이터 정정을 시장 손실로 오인하지 않게 한다. */
+  @Column(name = "position_corrected_at")
+  private LocalDateTime positionCorrectedAt;
+
   /** 항상 KRW 기준 평균 매입 단가 (매수 시점 환율로 환산된 값). */
   @Column(name = "avg_price", precision = 20, scale = 8)
   private BigDecimal avgPrice;
+
+  /** 원래 통화 기준 평균 매입 단가. 화면 표시용이며, KRW 손익 계산은 {@link #avgPrice}를 사용한다. */
+  @Column(name = "avg_price_original", precision = 20, scale = 8)
+  private BigDecimal avgPriceOriginal;
+
+  /** 최초 보유상태의 KRW 기준 평균 매입 단가. 거래 이력 재생의 기준값이다. */
+  @Column(name = "initial_avg_price", precision = 20, scale = 8)
+  private BigDecimal initialAvgPrice;
+
+  /** 최초 보유상태의 원래 통화 기준 평균 매입 단가. */
+  @Column(name = "initial_avg_price_original", precision = 20, scale = 8)
+  private BigDecimal initialAvgPriceOriginal;
 
   /** 원래 통화 기준 현재가. CASH/BANK 는 항상 1. */
   @Column(name = "current_price", precision = 20, scale = 8)
@@ -92,9 +122,13 @@ public class Asset extends BaseTimeEntity {
   @Column(nullable = false, length = 10)
   private String currency;
 
-  /** 현재 환율(원/통화). 국내주식·원화현금은 1. */
-  @Column(name = "exchange_rate", nullable = false, precision = 10, scale = 4)
+  /** 현재 환율(원/통화). KRW 자산은 1이며, 외화 자산은 현재 환율 입력 전까지 null 이다. */
+  @Column(name = "exchange_rate", precision = 10, scale = 4)
   private BigDecimal exchangeRate;
+
+  /** 현재 환율이 마지막으로 갱신된 시각. 가격 갱신 시각과 분리해 오래된 환율을 식별한다. */
+  @Column(name = "exchange_rate_updated_at")
+  private LocalDateTime exchangeRateUpdatedAt;
 
   /** 누적 실현손익(KRW). 매도 시에만 증감하며 전량 매도 후에도 초기화하지 않는다. */
   @Column(name = "realized_pnl", nullable = false, precision = 20, scale = 8)
@@ -123,12 +157,18 @@ public class Asset extends BaseTimeEntity {
     this.name = name;
     this.currency = currency;
     this.quantity = BigDecimal.ZERO;
+    this.initialQuantity = BigDecimal.ZERO;
     this.realizedPnl = BigDecimal.ZERO;
-    this.exchangeRate = BigDecimal.ONE;
+    // 매수 당시 환율은 Transaction 에 저장한다. 외화 자산의 현재 환율은 별도로 입력·갱신해야 하므로
+    // 등록 직후 1을 넣어 실제 환율처럼 계산하지 않는다. 알 수 없는 외화 환율은 null로 보존한다.
+    this.exchangeRate = "KRW".equalsIgnoreCase(currency) ? BigDecimal.ONE : null;
     this.source = AssetSource.MANUAL;
     if (type.isCashLike()) {
       // 현금성 자산은 "보유 금액이 곧 수량"이므로 단가를 1로 고정해 평가금액 공식을 공유한다.
       this.avgPrice = BigDecimal.ONE;
+      this.avgPriceOriginal = BigDecimal.ONE;
+      this.initialAvgPrice = BigDecimal.ONE;
+      this.initialAvgPriceOriginal = BigDecimal.ONE;
       this.currentPrice = BigDecimal.ONE;
     }
   }
@@ -146,6 +186,95 @@ public class Asset extends BaseTimeEntity {
   public static Asset create(
       Long userId, AssetType type, String symbol, String name, String currency) {
     return new Asset(userId, type, symbol, name, currency);
+  }
+
+  /**
+   * 서비스 사용 시작 시점의 현재 보유상태를 설정한다.
+   *
+   * <p>최초 보유량은 과거 매수 이벤트가 아니라 시작 상태다. 평균 매입 단가는 선택값이며, 입력되지 않으면 보유
+   * 자산의 평가금액은 계산하되 평가손익과 수익률은 알 수 없는 값으로 남긴다.
+   *
+   * @param quantity 최초 보유 수량 또는 현금 잔액. null이면 0
+   * @param averagePriceOriginal 원래 통화 기준 평균 매입 단가. 선택값
+   * @param averageExchangeRate 평균 매입 단가를 KRW로 환산할 당시 환율. KRW 자산은 1
+   * @throws BusinessException 수량이 음수이거나 평단가·환율 조합이 올바르지 않은 경우
+   */
+  public void initializePosition(
+      BigDecimal quantity,
+      BigDecimal averagePriceOriginal,
+      BigDecimal averageExchangeRate) {
+    BigDecimal initial = quantity == null ? BigDecimal.ZERO : quantity;
+    requireNonNegative(initial, "초기 보유 수량");
+
+    this.quantity = initial;
+    this.initialQuantity = initial;
+
+    if (type.isCashLike()) {
+      this.avgPrice = BigDecimal.ONE;
+      this.avgPriceOriginal = BigDecimal.ONE;
+      this.initialAvgPrice = BigDecimal.ONE;
+      this.initialAvgPriceOriginal = BigDecimal.ONE;
+      return;
+    }
+
+    if (averagePriceOriginal == null) {
+      this.avgPrice = null;
+      this.avgPriceOriginal = null;
+      this.initialAvgPrice = null;
+      this.initialAvgPriceOriginal = null;
+      return;
+    }
+
+    if (initial.compareTo(BigDecimal.ZERO) == 0) {
+      throw new BusinessException(ErrorCode.INVALID_INPUT, "보유 수량이 0이면 평균 매입 단가를 입력할 수 없습니다.");
+    }
+    requirePositive(averagePriceOriginal, "평균 매입 단가");
+    requirePositive(averageExchangeRate, "평균 매입 환율");
+
+    BigDecimal averagePriceKrw =
+        averagePriceOriginal
+            .multiply(averageExchangeRate)
+            .setScale(CALC_SCALE, RoundingMode.HALF_UP);
+    this.avgPrice = averagePriceKrw;
+    this.avgPriceOriginal = averagePriceOriginal.setScale(CALC_SCALE, RoundingMode.HALF_UP);
+    this.initialAvgPrice = this.avgPrice;
+    this.initialAvgPriceOriginal = this.avgPriceOriginal;
+  }
+
+  /**
+   * 화면에 표시할 심볼을 반환한다.
+   *
+   * <p>저장된 {@code symbol}은 시세 제공자용 불변 키다. 국내주식의 경우 사용자가 입력한 종목코드만 보여주고,
+   * Yahoo Finance용 {@code .KS}/{@code .KQ} 접미사는 화면에서 숨긴다.
+   *
+   * @return 사용자에게 보여줄 심볼
+   */
+  public String getDisplaySymbol() {
+    if (type == AssetType.STOCK && symbol.matches("\\d{6}\\.(KS|KQ)")) {
+      return symbol.substring(0, 6);
+    }
+    return symbol;
+  }
+
+  /**
+   * 화면에 표시할 시장 또는 가격 출처를 반환한다.
+   *
+   * @return 사용자가 이해할 수 있는 시장명
+   */
+  public String getMarketLabel() {
+    if (type == AssetType.CRYPTO) {
+      return "Binance Spot";
+    }
+    if (type == AssetType.STOCK && symbol.endsWith(".KS")) {
+      return "KOSPI";
+    }
+    if (type == AssetType.STOCK && symbol.endsWith(".KQ")) {
+      return "KOSDAQ";
+    }
+    if (type == AssetType.STOCK) {
+      return "해외주식";
+    }
+    return "투자 대기자금";
   }
 
   // ---------------------------------------------------------------------
@@ -191,12 +320,29 @@ public class Asset extends BaseTimeEntity {
     requirePositive(exchangeRate, "환율");
 
     BigDecimal buyPriceKrw = price.multiply(exchangeRate);
-    BigDecimal previousCost = this.quantity.multiply(avgPriceOrZero());
-    BigDecimal addedCost = quantity.multiply(buyPriceKrw);
+    BigDecimal previousQuantity = this.quantity;
     BigDecimal newQuantity = this.quantity.add(quantity);
 
-    this.avgPrice =
-        previousCost.add(addedCost).divide(newQuantity, CALC_SCALE, RoundingMode.HALF_UP);
+    if (previousQuantity.compareTo(BigDecimal.ZERO) == 0) {
+      this.avgPrice = buyPriceKrw.setScale(CALC_SCALE, RoundingMode.HALF_UP);
+      this.avgPriceOriginal = price.setScale(CALC_SCALE, RoundingMode.HALF_UP);
+    } else if (this.avgPrice != null) {
+      BigDecimal previousCost = previousQuantity.multiply(this.avgPrice);
+      BigDecimal addedCost = quantity.multiply(buyPriceKrw);
+      this.avgPrice =
+          previousCost.add(addedCost).divide(newQuantity, CALC_SCALE, RoundingMode.HALF_UP);
+
+      // 기존 Position 의 원통화 평단을 알고 있을 때만 새 원통화 평단도 정확히 계산할 수 있다.
+      if (this.avgPriceOriginal != null) {
+        BigDecimal previousOriginalCost = previousQuantity.multiply(this.avgPriceOriginal);
+        BigDecimal addedOriginalCost = quantity.multiply(price);
+        this.avgPriceOriginal =
+            previousOriginalCost
+                .add(addedOriginalCost)
+                .divide(newQuantity, CALC_SCALE, RoundingMode.HALF_UP);
+      }
+    }
+    // 기존 Position 의 평단을 모르면 일부를 추가 매수해도 전체 원가는 여전히 알 수 없다.
     this.quantity = newQuantity;
   }
 
@@ -221,16 +367,93 @@ public class Asset extends BaseTimeEntity {
     requirePositive(exchangeRate, "환율");
 
     if (this.quantity.compareTo(quantity) < 0) {
-      throw new InsufficientAssetQuantityException(this.quantity, quantity);
+      throw InsufficientAssetQuantityException.forPosition(
+          this.name, this.symbol, this.quantity, quantity);
     }
 
-    BigDecimal sellPriceKrw = price.multiply(exchangeRate);
-    BigDecimal profitPerUnit = sellPriceKrw.subtract(avgPriceOrZero());
-    this.realizedPnl =
-        this.realizedPnl
-            .add(profitPerUnit.multiply(quantity))
-            .setScale(CALC_SCALE, RoundingMode.HALF_UP);
+    if (this.avgPrice != null) {
+      BigDecimal sellPriceKrw = price.multiply(exchangeRate);
+      BigDecimal profitPerUnit = sellPriceKrw.subtract(this.avgPrice);
+      this.realizedPnl =
+          this.realizedPnl
+              .add(profitPerUnit.multiply(quantity))
+              .setScale(CALC_SCALE, RoundingMode.HALF_UP);
+    }
     this.quantity = this.quantity.subtract(quantity);
+  }
+
+  /**
+   * 잘못 입력한 최초 보유 수량을 사용자가 확인한 현재 실제 수량에 맞게 정정한다.
+   *
+   * <p>현재 수량을 직접 덮어쓰지 않고 {@code 실제 수량 - 현재 수량}만큼 최초 보유 수량을 보정한 뒤 거래 이력을
+   * 다시 재생한다. 따라서 이후 매수·매도가 있어도 평단가와 실현손익이 새 시작 수량을 기준으로 일관되게 계산된다.
+   * 매도 Transaction이나 정산 자산 이동은 만들지 않는다.
+   *
+   * @param correctedQuantity 사용자가 확인한 현재 실제 보유 수량
+   * @param transactions 거래 시점 오름차순으로 정렬된 기존 거래 이력
+   * @throws BusinessException 현금성 자산이거나, 최초 수량만 고쳐서는 만들 수 없는 상태이거나, 정정 후 기존 매도
+   *     시점의 보유 수량이 부족해지는 경우
+   */
+  public void correctCurrentQuantity(
+      BigDecimal correctedQuantity, List<Transaction> transactions) {
+    requireInvestmentType("보유 수량 정정");
+    requireNonNegative(correctedQuantity, "실제 보유 수량");
+    if (this.quantity.compareTo(correctedQuantity) == 0) {
+      return;
+    }
+
+    BigDecimal previousInitialQuantity = this.initialQuantity;
+    BigDecimal openingQuantity =
+        previousInitialQuantity == null ? BigDecimal.ZERO : previousInitialQuantity;
+    BigDecimal correctedOpeningQuantity =
+        openingQuantity.add(correctedQuantity.subtract(this.quantity));
+    if (correctedOpeningQuantity.compareTo(BigDecimal.ZERO) < 0) {
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT,
+          "최초 등록 수량만으로는 해당 수량으로 정정할 수 없습니다. 잘못 입력한 매수 거래가 있다면 거래 내역에서 삭제해주세요.");
+    }
+
+    BigDecimal previousQuantity = this.quantity;
+    BigDecimal previousAvgPrice = this.avgPrice;
+    BigDecimal previousAvgPriceOriginal = this.avgPriceOriginal;
+    BigDecimal previousRealizedPnl = this.realizedPnl;
+    this.initialQuantity = correctedOpeningQuantity;
+
+    try {
+      replay(transactions == null ? List.of() : transactions);
+      this.positionCorrectedAt = LocalDateTime.now();
+    } catch (InsufficientAssetQuantityException e) {
+      restorePositionState(
+          previousInitialQuantity,
+          previousQuantity,
+          previousAvgPrice,
+          previousAvgPriceOriginal,
+          previousRealizedPnl);
+      throw new BusinessException(
+          ErrorCode.INVALID_INPUT,
+          "이 수량으로 정정하면 기존 매도 시점의 보유 수량이 부족해집니다. 거래 내역을 먼저 확인해주세요.");
+    } catch (RuntimeException e) {
+      restorePositionState(
+          previousInitialQuantity,
+          previousQuantity,
+          previousAvgPrice,
+          previousAvgPriceOriginal,
+          previousRealizedPnl);
+      throw e;
+    }
+  }
+
+  private void restorePositionState(
+      BigDecimal initialQuantity,
+      BigDecimal quantity,
+      BigDecimal avgPrice,
+      BigDecimal avgPriceOriginal,
+      BigDecimal realizedPnl) {
+    this.initialQuantity = initialQuantity;
+    this.quantity = quantity;
+    this.avgPrice = avgPrice;
+    this.avgPriceOriginal = avgPriceOriginal;
+    this.realizedPnl = realizedPnl;
   }
 
   /**
@@ -251,9 +474,10 @@ public class Asset extends BaseTimeEntity {
    * @throws InsufficientAssetQuantityException 재생 도중 보유 수량이 음수가 되는 경우
    */
   public void replay(List<Transaction> transactions) {
-    this.quantity = BigDecimal.ZERO;
+    this.quantity = initialQuantity == null ? BigDecimal.ZERO : initialQuantity;
     this.realizedPnl = BigDecimal.ZERO;
-    this.avgPrice = type.isCashLike() ? BigDecimal.ONE : null;
+    this.avgPrice = type.isCashLike() ? BigDecimal.ONE : initialAvgPrice;
+    this.avgPriceOriginal = type.isCashLike() ? BigDecimal.ONE : initialAvgPriceOriginal;
 
     for (Transaction tx : transactions) {
       applyTransaction(tx);
@@ -283,7 +507,8 @@ public class Asset extends BaseTimeEntity {
     requireCashLikeType("출금");
     requirePositive(amount, "금액");
     if (this.quantity.compareTo(amount) < 0) {
-      throw new InsufficientAssetQuantityException(this.quantity, amount);
+      throw InsufficientAssetQuantityException.forCashBalance(
+          this.name, this.currency, this.quantity, amount);
     }
     this.quantity = this.quantity.subtract(amount);
   }
@@ -316,8 +541,41 @@ public class Asset extends BaseTimeEntity {
    * @throws BusinessException 환율이 0 이하인 경우 {@code INVALID_INPUT}
    */
   public void updateExchangeRate(BigDecimal rate) {
+    updateExchangeRate(rate, LocalDateTime.now());
+  }
+
+  /**
+   * 조회 시각과 함께 현재 환율을 갱신한다.
+   *
+   * @param rate 원/통화 환율
+   * @param updatedAt 외부 제공자에서 값을 확보한 시각
+   */
+  public void updateExchangeRate(BigDecimal rate, LocalDateTime updatedAt) {
     requirePositive(rate, "환율");
     this.exchangeRate = rate;
+    this.exchangeRateUpdatedAt = updatedAt == null ? LocalDateTime.now() : updatedAt;
+  }
+
+  /**
+   * 현재 보유분의 원화 평가가 환율 미확보 때문에 막혔는지 반환한다.
+   *
+   * <p>수량이 0이면 환율을 몰라도 평가금액은 정확히 0원이므로 화면에 경고하지 않는다.
+   *
+   * @return 보유 수량이 있는 외화 자산의 현재 환율이 없으면 true
+   */
+  public boolean isValuationBlockedByExchangeRate() {
+    return quantity.compareTo(BigDecimal.ZERO) > 0
+        && !"KRW".equalsIgnoreCase(currency)
+        && exchangeRate == null;
+  }
+
+  /**
+   * 화면·API에 노출할 현재 환율을 반환한다.
+   *
+   * @return 환율 미입력이면 null, 아니면 현재 환율
+   */
+  public BigDecimal getCurrentExchangeRate() {
+    return isValuationBlockedByExchangeRate() ? null : exchangeRate;
   }
 
   /**
@@ -366,6 +624,15 @@ public class Asset extends BaseTimeEntity {
     return deletedAt != null;
   }
 
+  /**
+   * 매매 정산용으로 자동 생성되는 기본 CASH 자산인지 반환한다.
+   *
+   * @return CASH이며 심볼이 KRW/USD/USDT이면 true
+   */
+  public boolean isDefaultSettlementAsset() {
+    return type == AssetType.CASH && DEFAULT_SETTLEMENT_CURRENCIES.contains(symbol);
+  }
+
   // ---------------------------------------------------------------------
   // 조회 — 계산된 값
   // ---------------------------------------------------------------------
@@ -379,7 +646,11 @@ public class Asset extends BaseTimeEntity {
    * @return 평가금액. 현재가를 한 번도 확보하지 못한 자산이면 {@code null}
    */
   public BigDecimal getValuation() {
-    if (currentPrice == null) {
+    // 0 USD/USDT는 환율을 아직 확보하지 못했더라도 수학적으로 정확히 0원이다.
+    if (quantity.compareTo(BigDecimal.ZERO) == 0) {
+      return BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+    if (currentPrice == null || exchangeRate == null || isValuationBlockedByExchangeRate()) {
       return null;
     }
     return quantity
@@ -391,23 +662,30 @@ public class Asset extends BaseTimeEntity {
   /**
    * 매입금액(KRW)을 계산한다.
    *
-   * @return {@code quantity × avgPrice}. 평단가가 없으면 0
+   * @return {@code quantity × avgPrice}. 보유 수량이 있지만 평단가를 모르면 {@code null}
    */
   public BigDecimal getCost() {
-    return quantity.multiply(avgPriceOrZero()).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    if (quantity.compareTo(BigDecimal.ZERO) == 0) {
+      return BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+    if (avgPrice == null) {
+      return null;
+    }
+    return quantity.multiply(avgPrice).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
 
   /**
    * 평가손익(KRW)을 계산한다.
    *
-   * @return {@code 평가금액 - 매입금액}. 평가금액을 계산할 수 없으면 {@code null}
+   * @return {@code 평가금액 - 매입금액}. 평가금액 또는 매입금액을 계산할 수 없으면 {@code null}
    */
   public BigDecimal getUnrealizedPnl() {
     BigDecimal valuation = getValuation();
-    if (valuation == null) {
+    BigDecimal cost = getCost();
+    if (valuation == null || cost == null) {
       return null;
     }
-    return valuation.subtract(getCost());
+    return valuation.subtract(cost);
   }
 
   /**
@@ -419,7 +697,7 @@ public class Asset extends BaseTimeEntity {
   public BigDecimal getPnlRate() {
     BigDecimal cost = getCost();
     BigDecimal pnl = getUnrealizedPnl();
-    if (pnl == null || cost.compareTo(BigDecimal.ZERO) == 0) {
+    if (pnl == null || cost == null || cost.compareTo(BigDecimal.ZERO) == 0) {
       return null;
     }
     return pnl.multiply(BigDecimal.valueOf(100)).divide(cost, RATE_SCALE, RoundingMode.HALF_UP);
@@ -444,13 +722,25 @@ public class Asset extends BaseTimeEntity {
     return priceUpdatedAt.isBefore(LocalDateTime.now().minusMinutes(ttlMinutes));
   }
 
+  /**
+   * 외화 자산의 현재 환율이 오래되었는지 판단한다.
+   *
+   * @param ttlMinutes 환율 유효 시간(분)
+   * @return 환율이 없거나 TTL을 넘겼으면 true
+   */
+  public boolean isExchangeRateStale(long ttlMinutes) {
+    if ("KRW".equalsIgnoreCase(currency)) {
+      return false;
+    }
+    if (isValuationBlockedByExchangeRate() || exchangeRateUpdatedAt == null) {
+      return true;
+    }
+    return exchangeRateUpdatedAt.isBefore(LocalDateTime.now().minusMinutes(ttlMinutes));
+  }
+
   // ---------------------------------------------------------------------
   // 내부 검증
   // ---------------------------------------------------------------------
-
-  private BigDecimal avgPriceOrZero() {
-    return avgPrice == null ? BigDecimal.ZERO : avgPrice;
-  }
 
   private void requireInvestmentType(String action) {
     if (!type.isInvestment()) {
@@ -471,6 +761,12 @@ public class Asset extends BaseTimeEntity {
   private void requirePositive(BigDecimal value, String fieldName) {
     if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
       throw new BusinessException(ErrorCode.INVALID_INPUT, "%s은(는) 0보다 커야 합니다.".formatted(fieldName));
+    }
+  }
+
+  private void requireNonNegative(BigDecimal value, String fieldName) {
+    if (value == null || value.compareTo(BigDecimal.ZERO) < 0) {
+      throw new BusinessException(ErrorCode.INVALID_INPUT, "%s은(는) 0 이상이어야 합니다.".formatted(fieldName));
     }
   }
 }

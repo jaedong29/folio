@@ -15,6 +15,12 @@ public enum ErrorCode {
   /** 매도·출금 수량이 보유 수량을 초과한 경우. */
   INSUFFICIENT_ASSET_QUANTITY(HttpStatus.BAD_REQUEST, "보유 수량이 부족합니다."),
 
+  /** 매수 또는 거래 삭제 정산에 필요한 투자 대기자금의 잔액이 부족한 경우. */
+  INSUFFICIENT_SETTLEMENT_FUNDS(HttpStatus.BAD_REQUEST, "정산할 투자 대기자금이 부족합니다."),
+
+  /** 투자 자산과 선택한 정산 자산의 통화가 다른 경우. */
+  SETTLEMENT_CURRENCY_MISMATCH(HttpStatus.BAD_REQUEST, "매매 자산과 정산 자산의 통화가 일치하지 않습니다."),
+
   /** 필수 필드 누락, 값 범위 위반 등 요청 자체가 잘못된 경우. */
   INVALID_INPUT(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다."),
 
@@ -50,6 +56,33 @@ public enum ErrorCode {
 
   /** 동일 (type, symbol) 자산을 중복 등록한 경우. */
   DUPLICATE_ASSET(HttpStatus.CONFLICT, "이미 등록된 자산입니다."),
+
+  /** 같은 자산에 같은 본문의 근거 자료를 다시 등록한 경우. */
+  DUPLICATE_EVIDENCE_DOCUMENT(HttpStatus.CONFLICT, "이미 등록된 근거 자료입니다."),
+
+  /** 존재하지 않거나 타인 소유인 근거 문서. */
+  EVIDENCE_DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "근거 자료를 찾을 수 없습니다."),
+
+  /** 존재하지 않거나 타인 소유인 Agent Trace. */
+  AGENT_TRACE_NOT_FOUND(HttpStatus.NOT_FOUND, "Agent 실행 기록을 찾을 수 없습니다."),
+
+  /** 화이트리스트에 등록되지 않은 뉴스 수집 출처. */
+  NEWS_SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "등록된 뉴스 출처를 찾을 수 없습니다."),
+
+  /** 존재하지 않는 뉴스 갱신 작업. */
+  NEWS_REFRESH_JOB_NOT_FOUND(HttpStatus.NOT_FOUND, "뉴스 갱신 작업을 찾을 수 없습니다."),
+
+  /** 외부 뉴스 수집을 명시적으로 비활성화한 환경. */
+  NEWS_COLLECTION_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "외부 뉴스 수집이 비활성화되어 있습니다."),
+
+  /** 명시적으로 켜지 않았거나 API 키가 없어 Agent를 실행할 수 없는 경우. */
+  AI_AGENT_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "금융 AI Agent가 비활성화되어 있습니다."),
+
+  /** 외부 LLM 제공자 연결·타임아웃·HTTP 오류. */
+  AI_PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "AI 모델 제공자에 연결할 수 없습니다."),
+
+  /** 제공자가 Tool 또는 최종 답변 계약과 다른 응답을 반환한 경우. */
+  AI_PROVIDER_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "AI 모델 응답 형식이 올바르지 않습니다."),
 
   /** 이미 가입된 이메일로 회원가입을 시도한 경우. */
   DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),

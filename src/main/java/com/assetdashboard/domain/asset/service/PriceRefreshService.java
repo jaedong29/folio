@@ -3,8 +3,10 @@ package com.assetdashboard.domain.asset.service;
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.entity.AssetSource;
 import com.assetdashboard.domain.asset.repository.AssetRepository;
+import com.assetdashboard.infra.price.PriceProperties;
 import com.assetdashboard.infra.price.PriceQuote;
 import com.assetdashboard.infra.price.SymbolKey;
+import com.assetdashboard.infra.price.fx.FxRateQuote;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PriceRefreshService {
 
   private final AssetRepository assetRepository;
+  private final PriceProperties priceProperties;
 
   /**
    * 조회된 시세를 자산에 반영하고, 갱신된 자산을 다시 읽어 돌려준다.
@@ -44,20 +47,64 @@ public class PriceRefreshService {
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public List<Asset> applyQuotes(List<Long> assetIds, Map<SymbolKey, PriceQuote> quotes) {
-    List<Asset> assets = assetRepository.findAllById(assetIds);
-    if (quotes.isEmpty()) {
+    return applyMarketData(assetIds, quotes, Map.of(), false);
+  }
+
+  /**
+   * 조회된 시세를 반영한다.
+   *
+   * @param assetIds 반영 대상 자산 id
+   * @param quotes 조회된 시세
+   * @param force true 면 TTL 안의 자산도 반영한다
+   * @return 반영 후 자산 목록
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public List<Asset> applyQuotes(
+      List<Long> assetIds, Map<SymbolKey, PriceQuote> quotes, boolean force) {
+    return applyMarketData(assetIds, quotes, Map.of(), force);
+  }
+
+  /**
+   * 조회된 자산 시세와 통화 환율을 한 번의 짧은 트랜잭션으로 반영한다.
+   *
+   * @param assetIds 반영 대상 자산 id
+   * @param quotes 심볼별 현재가
+   * @param rates 통화별 KRW 환율
+   * @param force true면 TTL 안의 저장값도 새 조회값으로 갱신한다
+   * @return 반영 후 자산 목록
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public List<Asset> applyMarketData(
+      List<Long> assetIds,
+      Map<SymbolKey, PriceQuote> quotes,
+      Map<String, FxRateQuote> rates,
+      boolean force) {
+    List<Asset> assets = assetRepository.findAllByIdForUpdate(assetIds);
+    if (quotes.isEmpty() && rates.isEmpty()) {
       return assets;
     }
 
     for (Asset asset : assets) {
       PriceQuote quote = quotes.get(new SymbolKey(asset.getType(), asset.getSymbol()));
-      if (quote == null) {
-        continue;
+      // 다른 조회 요청이 먼저 같은 시세를 반영했다면 이미 최신 상태다. 같은 행을 다시 쓰지 않는다.
+      if (quote != null
+          && !quote.isExpired(priceProperties.cacheTtlMinutes())
+          && (force || asset.isPriceStale(priceProperties.cacheTtlMinutes()))) {
+        asset.updateCurrentPrice(quote.price(), AssetSource.API);
       }
-      asset.updateCurrentPrice(quote.price(), AssetSource.API);
-      if (quote.exchangeRate() != null) {
-        // CRYPTO 만 환율까지 자동 조회된다. 해외주식의 환율은 수동 입력이므로 덮어쓰지 않는다.
-        asset.updateExchangeRate(quote.exchangeRate());
+
+      FxRateQuote rate = rates.get(asset.getCurrency().toUpperCase());
+      if (rate != null
+          && !rate.isExpired(priceProperties.cacheTtlMinutes())
+          && (force || asset.isExchangeRateStale(priceProperties.cacheTtlMinutes()))) {
+        asset.updateExchangeRate(rate.krwRate(), rate.fetchedAt());
+      } else if (rate == null
+          && quote != null
+          && quote.exchangeRate() != null
+          && !quote.isExpired(priceProperties.cacheTtlMinutes())
+          && (force || asset.isExchangeRateStale(priceProperties.cacheTtlMinutes()))) {
+        // 기존 PriceQuote 계약을 사용하는 호출부와의 호환 경로다.
+        asset.updateExchangeRate(quote.exchangeRate(), quote.fetchedAt());
       }
     }
     return assets;

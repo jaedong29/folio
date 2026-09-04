@@ -1,6 +1,9 @@
 package com.assetdashboard.global.exception;
 
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import jakarta.validation.ConstraintViolationException;
+import java.util.Comparator;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -65,18 +68,30 @@ public class GlobalExceptionHandler {
     return badRequest(e.getMessage());
   }
 
-  /**
-   * 요청 본문 파싱 실패(잘못된 JSON, 알 수 없는 Enum 값 등)를 {@code INVALID_INPUT}으로 응답한다.
-   *
-   * @param e 파싱 실패 예외
-   * @return 에러 응답
-   */
-  @ExceptionHandler({
-    HttpMessageNotReadableException.class,
-    MethodArgumentTypeMismatchException.class,
-    MissingServletRequestParameterException.class
-  })
-  public ResponseEntity<ErrorResponse> handleUnreadable(Exception e) {
+  /** 알 수 없는 JSON 필드는 오타 난 필드명과 사용 가능한 필드 목록을 함께 알려준다. */
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
+    log.warn("[InvalidRequest] {}", e.getMessage());
+    UnrecognizedPropertyException unknown = findCause(e, UnrecognizedPropertyException.class);
+    if (unknown != null) {
+      String available =
+          unknown.getKnownPropertyIds().stream()
+              .filter(Objects::nonNull)
+              .map(Object::toString)
+              .sorted(Comparator.naturalOrder())
+              .collect(Collectors.joining(", "));
+      String message = "알 수 없는 필드입니다: %s".formatted(unknown.getPropertyName());
+      if (!available.isBlank()) {
+        message += ". 사용 가능한 필드: " + available;
+      }
+      return badRequest(message);
+    }
+    return badRequest(ErrorCode.INVALID_INPUT.getMessage());
+  }
+
+  /** 쿼리 파라미터·경로 변수 파싱 실패를 공통 입력 오류로 응답한다. */
+  @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class})
+  public ResponseEntity<ErrorResponse> handleParameterMismatch(Exception e) {
     log.warn("[InvalidRequest] {}", e.getMessage());
     return badRequest(ErrorCode.INVALID_INPUT.getMessage());
   }
@@ -161,5 +176,16 @@ public class GlobalExceptionHandler {
   private ResponseEntity<ErrorResponse> badRequest(String message) {
     return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
         .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, message));
+  }
+
+  private static <T extends Throwable> T findCause(Throwable throwable, Class<T> type) {
+    Throwable current = throwable;
+    while (current != null) {
+      if (type.isInstance(current)) {
+        return type.cast(current);
+      }
+      current = current.getCause();
+    }
+    return null;
   }
 }

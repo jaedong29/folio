@@ -9,14 +9,19 @@ import java.time.LocalDateTime;
  * Portfolio 화면의 자산 한 줄 (PRD 4-5).
  *
  * @param assetId 자산 id
- * @param symbol 시세 조회 키
+ * @param symbol 시세 조회에 사용하는 불변 키
+ * @param displaySymbol 사용자 화면에 보여줄 심볼
  * @param name 표시 이름
+ * @param marketLabel 시장 또는 가격 출처 표시명
  * @param type 자산 종류
  * @param quantity 보유 수량
  * @param avgPrice 평균 매입 단가 (KRW)
+ * @param avgPriceOriginal 평균 매입 단가 (원래 통화)
  * @param currentPrice 현재가 (원래 통화 기준)
  * @param currency 통화 코드
  * @param exchangeRate 현재 환율
+ * @param exchangeRateMissing 외화 자산의 현재 환율을 아직 입력하지 않았으면 true
+ * @param costBasisMissing 보유 중이지만 평단을 모르면 true
  * @param valuationKRW 평가금액 (KRW). 현재가를 확보하지 못했으면 null
  * @param unrealizedPnl 평가손익 (KRW)
  * @param unrealizedPnlRate 평가손익률(%). <b>매입금액이 0이면 null</b> — 프론트는 {@code -} 로 표시한다
@@ -27,13 +32,18 @@ import java.time.LocalDateTime;
 public record PortfolioResponse(
     Long assetId,
     String symbol,
+    String displaySymbol,
     String name,
+    String marketLabel,
     AssetType type,
     BigDecimal quantity,
     BigDecimal avgPrice,
+    BigDecimal avgPriceOriginal,
     BigDecimal currentPrice,
     String currency,
     BigDecimal exchangeRate,
+    boolean exchangeRateMissing,
+    boolean costBasisMissing,
     BigDecimal valuationKRW,
     BigDecimal unrealizedPnl,
     BigDecimal unrealizedPnlRate,
@@ -52,13 +62,18 @@ public record PortfolioResponse(
     return new PortfolioResponse(
         asset.getId(),
         asset.getSymbol(),
+        asset.getDisplaySymbol(),
         asset.getName(),
+        asset.getMarketLabel(),
         asset.getType(),
         asset.getQuantity(),
         asset.getAvgPrice(),
+        asset.getAvgPriceOriginal(),
         asset.getCurrentPrice(),
         asset.getCurrency(),
-        asset.getExchangeRate(),
+        asset.getCurrentExchangeRate(),
+        asset.isValuationBlockedByExchangeRate(),
+        asset.getQuantity().compareTo(BigDecimal.ZERO) > 0 && asset.getAvgPrice() == null,
         asset.getValuation(),
         asset.getUnrealizedPnl(),
         asset.getPnlRate(),
