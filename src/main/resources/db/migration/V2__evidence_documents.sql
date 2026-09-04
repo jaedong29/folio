@@ -1,0 +1,21 @@
+CREATE TABLE evidence_documents (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    asset_id BIGINT NOT NULL,
+    symbol VARCHAR(30) NOT NULL,
+    source_type VARCHAR(20) NOT NULL,
+    trust VARCHAR(40) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    publisher VARCHAR(120),
+    source_url VARCHAR(2048),
+    published_at DATETIME(6),
+    content LONGTEXT NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_evidence_user_asset_hash UNIQUE (user_id, asset_id, content_hash),
+    KEY idx_evidence_user_asset_published (user_id, asset_id, published_at),
+    KEY idx_evidence_user_symbol (user_id, symbol),
+    CONSTRAINT fk_evidence_user FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT fk_evidence_asset FOREIGN KEY (asset_id) REFERENCES assets (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
