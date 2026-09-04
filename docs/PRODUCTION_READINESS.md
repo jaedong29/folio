@@ -20,6 +20,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
 | 골든셋 Live 커버리지 확장 | fixture만으로 확장 가능한 4건(`stale-price`, `stale-fx`, `transaction-evidence`, `price-direction`)을 추가해 5개 → 9개로, 이어서 `searchSymbolEvidence` Agent Tool을 연결해 사용자 등록 근거 자료 7건을 추가해 9개 → 16개로 확장. 나머지 2개(`news-correlation`, `future-document`)는 멀티 Tool 체이닝·날짜 파싱이 필요해 포함하지 않음(아래 갭 참고) | `evidence/document/SymbolEvidenceService.java`, `SymbolEvidenceAnswerGuardrail.java`, `LiveEvaluationBatchQueueService.SUPPORTED_CASES` |
 | 거래 멱등성 키 | 매수·매도·입금·출금 4개 API가 `Idempotency-Key` 헤더를 필수로 받아, 네트워크 재시도·버튼 중복 클릭으로 같은 요청이 두 번 와도 한 번만 체결. DB unique 제약(`user_id`, `idempotency_key`)으로 동시 요청 경합도 막고, 같은 키에 다른 요청 본문이 오면 `409 IDEMPOTENCY_KEY_REUSED`로 거부. 24시간 뒤 자동 만료 | `domain/transaction/service/TransactionIdempotencyService.java`, `V9__idempotency_keys.sql` |
+| Refresh Token 정리 작업 | 만료된 지 7일 지난 Refresh Token 행을 매일 자동 삭제. 재사용 탐지(`rotate()`가 폐기 여부를 만료 여부보다 먼저 검사)에 잠시 쓰일 수 있어 만료 즉시가 아니라 유예 기간을 두고 지움 — 그전까지는 `refresh_tokens` 테이블이 무기한 쌓였음 | `global/security/RefreshTokenService.evictExpiredTokens()` |
 
 ## 남은 갭
 
@@ -50,13 +51,11 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 - **골든셋 커버리지가 거의 끝났지만 2개가 남았다.** 금융 Evidence 골든셋 18개 중 16개는 실제 NIM으로 실행 가능하다. 남은 `news-correlation`(한 질문에 `getAssetEvidence`+`searchSymbolEvidence` 두 Tool 결과를 합쳐야 함)과 `future-document`(질문 속 날짜로 `publishedAt`을 필터링해야 함)는 질문당 Tool을 하나만 호출하는 현재 Agent 구조로는 풀리지 않는다. 멀티 Tool 체이닝은 비용·지연이 늘어나는 설계 변경이라 의도적으로 미뤘다.
 - **뉴스 출처가 하나다.** 실제로 수집하는 출처는 Zcash Foundation의 Zebra GitHub Releases뿐이라, 화면의 Companies/Macro/FX/Geopolitics 분류는 아직 계약(향후 Adapter를 위한 인터페이스)일 뿐 실제 커버리지가 아니다.
-- **CI 워크플로가 아직 실행된 적이 없다.** 이 저장소에 원격(GitHub remote)이 연결되지 않아 `.github/workflows/ci.yml`은 로컬에서 검증했을 뿐 실제 push에서 동작한 적이 없다.
 
 ## 지금부터 순서대로 하나만 고른다면
 
-1. **CI를 GitHub에 연결한다.** 이미 만들어진 워크플로를 실제로 한 번 돌려보는 것 — 가장 리스크가 낮고 바로 확인 가능하다.
-2. **다중 인스턴스 대비 분산 락.** 실제로 인스턴스를 늘릴 계획이 생기기 전까지는 우선순위가 낮다 — 지금 단일 인스턴스 MVP에는 과설계다. 늘리기로 하면 `LoginAttemptGuard`/`AuthRateLimitFilter`의 메모리 상태도 이때 같이 옮겨야 한다.
-3. **`news-correlation`/`future-document` 멀티 Tool 체이닝.** golden set 18개 중 마지막 2개. 비용·지연이 늘어나는 설계 변경이라 실제로 필요해지기 전까지는 미룬다.
+1. **다중 인스턴스 대비 분산 락.** 실제로 인스턴스를 늘릴 계획이 생기기 전까지는 우선순위가 낮다 — 지금 단일 인스턴스 MVP에는 과설계다. 늘리기로 하면 `LoginAttemptGuard`/`AuthRateLimitFilter`의 메모리 상태도 이때 같이 옮겨야 한다.
+2. **`news-correlation`/`future-document` 멀티 Tool 체이닝.** golden set 18개 중 마지막 2개. 비용·지연이 늘어나는 설계 변경이라 실제로 필요해지기 전까지는 미룬다.
 
 MyData 연동, 지갑 자동 연동, 주문 실행처럼 이 프로젝트의 문제 정의 자체를 벗어나는 확장은 이
 목록에 넣지 않았습니다. 각 기능의 세부 한계는 [README](../README.md)의 "의도적으로 남긴

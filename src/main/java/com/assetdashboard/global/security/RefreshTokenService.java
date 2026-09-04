@@ -14,6 +14,7 @@ import java.util.HexFormat;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class RefreshTokenService {
 
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+  // 만료된 토큰도 재사용 탐지(rotate()가 revoked 여부를 expired보다 먼저 검사)에 잠시 쓰일 수 있어 바로
+  // 지우지 않는다. 만료 후 이 기간이 지나면 그 신호도 의미가 없어지므로 그때 정리한다.
+  private static final long EXPIRED_RETENTION_DAYS = 7;
 
   private final RefreshTokenRepository repository;
   private final JwtProperties properties;
@@ -77,6 +82,17 @@ public class RefreshTokenService {
   @Transactional
   public void revokeAllForUser(Long userId) {
     repository.revokeAllByUserId(userId, Instant.now(clock));
+  }
+
+  /** 만료된 지 오래된 토큰을 지운다. 회전·재사용 탐지는 실행 시점의 행 존재 여부에 의존하지 않으므로 안전하다. */
+  @Scheduled(fixedRate = 86_400_000)
+  @Transactional
+  public void evictExpiredTokens() {
+    Instant cutoff = Instant.now(clock).minus(EXPIRED_RETENTION_DAYS, ChronoUnit.DAYS);
+    int deleted = repository.deleteAllByExpiresAtBefore(cutoff);
+    if (deleted > 0) {
+      log.info("[RefreshToken] 만료 후 {}일 지난 토큰 {}건을 정리했습니다.", EXPIRED_RETENTION_DAYS, deleted);
+    }
   }
 
   private IssuedRefreshToken issue(Long userId, String familyId) {

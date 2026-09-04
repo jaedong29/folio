@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,5 +51,32 @@ class RefreshTokenServiceIntegrationTest {
         .isInstanceOfSatisfying(
             BusinessException.class,
             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REFRESH_TOKEN));
+  }
+
+  @Test
+  void evictExpiredTokensDeletesOnlyRowsPastTheRetentionWindow() {
+    userId = 6_000_000L + (System.nanoTime() % 1_000_000);
+    Instant now = Instant.now();
+    RefreshToken longExpired =
+        RefreshToken.issue(
+            userId,
+            UUID.randomUUID().toString(),
+            "evict-test-" + UUID.randomUUID(),
+            now.minus(30, ChronoUnit.DAYS),
+            now.minus(10, ChronoUnit.DAYS));
+    RefreshToken stillFresh =
+        RefreshToken.issue(
+            userId,
+            UUID.randomUUID().toString(),
+            "evict-test-" + UUID.randomUUID(),
+            now,
+            now.plus(14, ChronoUnit.DAYS));
+    repository.save(longExpired);
+    repository.save(stillFresh);
+
+    service.evictExpiredTokens();
+
+    assertThat(repository.findByTokenHash(longExpired.getTokenHash())).isEmpty();
+    assertThat(repository.findByTokenHash(stillFresh.getTokenHash())).isPresent();
   }
 }

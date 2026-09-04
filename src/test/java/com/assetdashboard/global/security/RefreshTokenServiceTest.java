@@ -121,6 +121,13 @@ class RefreshTokenServiceTest {
     verify(repository).revokeAllByUserId(eq(7L), any());
   }
 
+  @Test
+  void evictExpiredTokensDeletesRowsExpiredBeforeTheRetentionWindow() {
+    service.evictExpiredTokens();
+
+    verify(repository).deleteAllByExpiresAtBefore(Instant.parse("2026-08-29T00:00:00Z"));
+  }
+
   private RefreshToken activeToken(Long userId, String familyId, String tokenHash) {
     RefreshToken token =
         RefreshToken.issue(

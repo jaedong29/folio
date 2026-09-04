@@ -142,14 +142,15 @@ fingerprint는 `(operation, assetId, request 직렬화)`의 SHA-256이라, 같�
 "정상적인 이중 매수"가 된다. 이건 낙관적 락이 아니라 요청 자체를 식별해서 막아야 하는 문제다.
 
 ### 왜 `REQUIRES_NEW`가 아니라 기본 `@Transactional`인가
-§7(Refresh Token 재사용 탐지)에서는 실패해도 폐기 기록을 남겨야 해서 `REQUIRES_NEW` + `noRollbackFor`를 썼다.
-여기는 반대다 — **거래 자체가 실패하면 claim도 함께 롤백돼야** 사용자가 같은 키로 (또는 고친 요청으로) 다시
-시도할 수 있다. "실패해도 흔적을 남긴다"가 아니라 "성공한 것만 기억한다"가 맞는 정책이라, claim과 완료 기록은
-호출자(`TransactionService`)의 트랜잭션에 그대로 참여시켰다.
+Refresh Token 재사용 탐지(`RefreshTokenService.rotate()`, §3-2)에서는 실패해도 폐기 기록을 남겨야 해서
+`REQUIRES_NEW` + `noRollbackFor`를 썼다. 여기는 반대다 — **거래 자체가 실패하면 claim도 함께 롤백돼야** 사용자가
+같은 키로 (또는 고친 요청으로) 다시 시도할 수 있다. "실패해도 흔적을 남긴다"가 아니라 "성공한 것만 기억한다"가
+맞는 정책이라, claim과 완료 기록은 호출자(`TransactionService`)의 트랜잭션에 그대로 참여시켰다.
 
 ### 실제 확인 결과
 같은 키로 `buy()`를 두 번 호출(재시도 시나리오)했을 때, `@Transactional` 경계를 진짜로 통과하는지 보려고
-§4처럼 클래스 단위 `@Transactional`을 걸지 않은 통합 테스트로 확인했다.
+클래스 단위 `@Transactional`을 걸지 않은 통합 테스트로 확인했다 — 걸었다면 두 호출이 테스트 트랜잭션 하나에
+참여해 서로의 미커밋 쓰기를 그대로 보게 되어, 커밋까지 끝난 뒤에도 중복 실행이 안 되는지를 검증하지 못한다.
 
 | 검증 | 결과 |
 |---|---|
@@ -170,8 +171,59 @@ fingerprint는 `(operation, assetId, request 직렬화)`의 SHA-256이라, 같�
   폼을 다시 열면 새 키를 만든다.
 - **"다중 인스턴스에서도 안전한가?"**
   → 그렇다. claim은 DB unique 제약(INSERT 경합 시 `DataIntegrityViolationException`)에 의존하지 인메모리 상태를
-  쓰지 않는다 — §Production Readiness의 "단일 인스턴스 메모리 상태" 갭(로그인 잠금 등)과 달리 별도 인프라 없이도
-  다중 인스턴스로 확장된다.
+  쓰지 않는다 — `docs/PRODUCTION_READINESS.md`의 "단일 인스턴스 메모리 상태" 갭(로그인 잠금 등)과 달리 별도
+  인프라 없이도 다중 인스턴스로 확장된다.
+
+---
+
+## 3-2. Refresh Token 정리 작업 — 폐기해도 지우지는 않던 문제
+
+### 무엇을 했나
+`RefreshTokenService.rotate()`는 회전마다 이전 토큰의 `revokedAt`만 채우고 행 자체는 지우지 않는다(재사용 탐지가
+"이미 폐기된 토큰이 다시 왔는가"를 판정하려면 그 행이 남아 있어야 한다). 그런데 이 행을 지우는 코드가 어디에도
+없어서, 만료된 뒤로도 `refresh_tokens` 테이블에 **무기한** 쌓이고 있었다.
+
+만료 후 7일이 지난 행을 매일 자동 삭제하는 `@Scheduled` 작업을 추가했다.
+
+```java
+@Scheduled(fixedRate = 86_400_000)
+@Transactional
+public void evictExpiredTokens() {
+  Instant cutoff = Instant.now(clock).minus(EXPIRED_RETENTION_DAYS, ChronoUnit.DAYS);
+  repository.deleteAllByExpiresAtBefore(cutoff);
+}
+```
+
+### 왜 만료 즉시가 아니라 7일 유예를 두나
+`rotate()`의 판정 순서는 **폐기 여부를 만료 여부보다 먼저** 본다.
+
+```java
+if (existing.isRevoked()) { /* family 전체 폐기 — 탈취 신호 */ }
+if (existing.isExpired(now)) { /* 그냥 만료 */ }
+```
+
+즉 이미 만료된 토큰이라도 그게 **폐기된** 토큰이면 재사용 탐지가 여전히 의미 있는 신호(탈취 시도)를 준다. 만료
+직후 바로 지우면 이 신호를 잃는다. 7일은 이 프로젝트의 Refresh Token 수명(기본 14일, `refreshExpirationDays`)의
+절반 정도를 유예로 준 임의의 값이다 — 탐지 가치와 무한정 쌓이는 문제 사이의 절충이다.
+
+### 실제 확인 결과
+`@SpringBootTest` 통합 테스트로 실제 H2에 만료 10일 지난 토큰과 아직 유효한 토큰을 각각 저장하고
+`evictExpiredTokens()`를 호출했다.
+
+| 검증 | 결과 |
+|---|---|
+| 만료 10일 지난 토큰(유예 7일 초과) | 삭제됨 |
+| 아직 유효한 토큰 | 그대로 남음 |
+
+### 실무자가 물어볼 만한 지점
+- **"멱등성 키 정리(§3-1)는 1시간마다인데 왜 이건 하루마다인가?"**
+  → 정리 주기는 유예 기간에 비해 충분히 촘촘하면 된다. 멱등성 키는 24시간 유예에 1시간 주기(유예의 1/24),
+  Refresh Token은 7일 유예에 1일 주기(유예의 1/7)로 비슷한 비율을 유지했다. Refresh Token 쪽은 애초에 유예가
+  길어서 그만큼 자주 돌 필요가 없다.
+- **"왜 진작 없었나?"**
+  → Refresh Token 회전 자체를 만들 때는 "탈취 탐지"에 집중했고, 정리는 별도 갭으로 `docs/PRODUCTION_READINESS.md`에
+  남겨뒀다가 우선순위 논의에서 골라 이번에 구현했다. 개인 MVP 규모에서는 테이블이 몇만 행을 넘기 전까지 성능
+  영향이 없어 급하지 않았다.
 
 ---
 
