@@ -234,6 +234,8 @@ API 키는 `application.yml`, `.env`, 명령행 인자나 Git에 저장하지 �
 
 실제 NIM 응답을 단일 자산 골든케이스로 평가하려면 Swagger에서 local 전용 API를 순서대로 호출한다. 합성 fixture를 제공하는 caseId는 `fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`다.
 
+반복 검증은 `POST /api/ai/evaluations/live-runs`에 `{"confirmLiveCalls":true,"caseIds":[]}`를 보내면 된다. 빈 목록은 계산 4건과 `symbol-official-news`를 합친 5건을 뜻하며, HTTP 요청과 분리된 Worker가 순차 실행한다. 한 배치는 최대 5케이스로 제한되고 같은 사용자의 활성 배치는 재사용한다. 평가 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 5케이스의 최대 제공자 호출 수는 10회이며, 응답은 이 상한과 Trace에서 관찰된 모델 단계 수를 함께 보여준다. `GET /api/ai/evaluations/live-runs/{batchId}`에서 케이스별 Trace, 통과 여부, hard failure, 평균·P95 지연, 총 토큰을 확인한다. 질문·답변 원문은 배치 테이블에 저장하지 않는다.
+
 ```text
 POST /api/ai/evaluations/fixtures/{caseId}
 → 반환된 assetId 확인
@@ -386,7 +388,7 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 2. Prompt Injection fixture를 사용하는 Tool 입력 파서·시스템 규칙 회귀 테스트
 3. `searchSymbolEvidence`, `getEvidenceDocument`를 Agent 읽기 전용 Tool로 연결
 4. 결정적 질문 라우터와 모델의 자동 Tool 선택 평가 분리
-5. 18개 Evidence 골든셋 전체를 실제 DB fixture + NIM으로 일괄 실행하는 Runner 완성 (현재는 missing-fx 등 일부만 개별 실행·검증함)
+5. 현재 실제 DB fixture + NIM 배치가 지원하는 5개 사례를 나머지 골든셋까지 확장해 18개 전체 Runner 완성
 6. Spring AI Observability와 OpenTelemetry Trace 내보내기
 7. 기업별 IR 도메인을 symbol과 안전하게 연결하는 공식 출처 정책 확장
 8. 키워드 검색과 임베딩 검색의 인용 정확도·시점 정확도 비교
