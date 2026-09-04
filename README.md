@@ -421,6 +421,7 @@ MyData·지갑 자동 연동·주문 실행은 이 MVP의 문제 정의를 벗�
 | [Evidence Evaluation Golden Set](docs/EVIDENCE_EVALUATION_GOLDEN_SET.md) | LLM 전에 고정한 18개 질문·기대 Tool·판정·금지 주장 |
 | [Agent Trace & Minimum Harness](docs/AGENT_TRACE_EVALUATION_HARNESS.md) | Run·Span 트리, 규칙 채점, 민감정보 경계와 남은 사용자 선택 |
 | [Shared News Feed](docs/SHARED_NEWS_FEED.md) | 공용 뉴스 저장소 구조, 비동기 수집·중복 제거, 현재 실제 수집 범위 |
+| [Production Readiness](docs/PRODUCTION_READINESS.md) | 실제 운영 가정 시 완료된 항목과 남은 갭, 우선순위 |
 | [Handoff](docs/HANDOFF_2026-08-10.md) | 다른 환경에서 이어서 작업하기 위한 인수인계 기록 |
 
 ## 발표에서 받고 싶은 피드백
