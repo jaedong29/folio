@@ -14,6 +14,7 @@ POST /api/news/refresh
 → durable news_refresh_jobs에 PENDING 저장
 → 백그라운드 Worker가 화이트리스트 Source 호출
 → (source_key, external_id) 기준 upsert와 content hash 비교
+→ 새 content hash만 별도 Worker가 NIM 한국어 요약
 → GET /api/news?scope=ALL|PORTFOLIO 로 조회
 ```
 
@@ -21,6 +22,9 @@ POST /api/news/refresh
 - 공식 출처 Adapter가 지정한 symbol과 topic만 저장한다.
 - API 응답에는 전문 대신 짧은 excerpt와 원문 URL을 노출한다.
 - 외부 내용은 검증된 공식 출처여도 LLM 명령이 아닌 `untrustedContent`로 취급한다.
+- 요약은 `PENDING/RUNNING/COMPLETED/FAILED` 상태와 모델·프롬프트 버전·지연·토큰을 함께 저장한다.
+- 요약에 가격 전망·투자 권유·원문에 없는 숫자가 있으면 저장하지 않고 원문 excerpt로 돌아간다.
+- 완료된 요약도 공식 원문 일부와 원문 링크를 함께 보여준다.
 - 사용자나 자산을 삭제해도 공용 뉴스는 유지한다. `PORTFOLIO` 조회에서 활성 자산 symbol이 사라질 뿐이다.
 
 ## 비용과 운영 제어
@@ -33,6 +37,10 @@ POST /api/news/refresh
 - 수집 실패는 안전한 오류 코드만 작업에 기록
 - Agent 검색 결과가 없으면 NIM을 호출하지 않고 `UNAVAILABLE` 반환
 - 일반 Agent 질문은 결정적 Tool 라우팅으로 모델 호출을 한 번으로 제한
+- News 요약은 사용자별 요청이 아니라 새 공용 자료당 한 번만 실행
+- 같은 `contentHash`는 완료 요약을 재사용하고 원문 변경 시에만 재요약
+
+`APP_AI_ENABLED=true`이면 기본적으로 요약 Worker도 활성화된다. Agent는 사용하되 자동 요약 비용을 막으려면 `APP_NEWS_SUMMARY_ENABLED=false`를 설정한다. AI가 꺼졌거나 요약에 실패해도 뉴스 조회와 공식 원문 링크는 정상 동작한다.
 
 단일 애플리케이션 인스턴스 MVP에서는 프로세스 내부 동기화로 중복 enqueue를 줄인다. 다중 인스턴스 운영 전에는 DB 기반 claim 락 또는 별도 작업 큐가 필요하다.
 
@@ -51,4 +59,5 @@ POST /api/news/refresh
 2. 일반 언론은 robots, 약관, 저작권을 확인하고 제목·짧은 요약·원문 링크 중심으로 제한한다.
 3. Source별 요청 제한, 재시도, 지수 백오프, 마지막 성공/실패 지표를 분리한다.
 4. 다중 인스턴스에서는 작업 claim을 DB 락 또는 메시지 큐로 단일화한다.
-5. 수집 품질과 Agent 답변은 출처 정확도, 시점 정확도, 인용 누락, 근거 없는 인과로 평가한다.
+5. 한국어 요약 골든셋을 추가해 사실 보존, 숫자 지지 여부, Prompt Injection, 가격 인과 표현을 평가한다.
+6. 수집 품질과 Agent 답변은 출처 정확도, 시점 정확도, 인용 누락, 근거 없는 인과로 평가한다.

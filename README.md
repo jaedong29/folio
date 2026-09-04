@@ -34,7 +34,7 @@ Folio는 증권 주문 앱이나 금융기관 연동 서비스가 아닙니다. 
 | Analysis | 09:00 KST 기준 Portfolio Snapshot, 외부 입출금을 보정한 Daily PnL, 기간별 자산 분석 |
 | Financial Evidence | 가격·환율·평단·최근 거래 근거 조회, `CONFIRMED/PARTIAL/UNAVAILABLE` 판정 |
 | Personal Evidence | 등록 자산별 자료·메모 붙여넣기, 출처 메타데이터·중복 방지·키워드 검색 |
-| Shared News | 공용 공식자료 저장, 출처 화이트리스트, 비동기 수집·중복 제거·TTL, 전체/내 자산 필터 |
+| Shared News | 공용 공식자료 저장, 출처 화이트리스트, 비동기 수집·중복 제거·TTL, 전체/내 자산 필터, NIM 한국어 요약 캐시 |
 | Auth | JWT 인증, BCrypt 비밀번호, 이메일 중복확인, 비밀번호 변경·회원 탈퇴, 소유권 기반 404 인가 정책 |
 | UX | 금액 가리기, 모바일 현재가 펼쳐보기, 빈 값·stale 상태 표시, 구체적인 오류 안내 |
 
@@ -227,6 +227,8 @@ cd asset
 read -s "NVIDIA_API_KEY?NVIDIA API Key: "; export NVIDIA_API_KEY; echo
 APP_AI_ENABLED=true ./gradlew bootRun
 ```
+
+공식자료 갱신 시 공용 한국어 요약도 함께 만들며, `APP_NEWS_SUMMARY_ENABLED=false`로 Agent와 별도로 요약 비용을 차단할 수 있다. 같은 `contentHash`의 자료는 다시 요약하지 않고, NIM 또는 Guardrail 실패 시 공식 원문 excerpt를 표시한다.
 
 API 키는 `application.yml`, `.env`, 명령행 인자나 Git에 저장하지 않는다. 실행 API는 `POST /api/ai/agent/assets/{assetId}/ask`이며 인증된 사용자의 경로 자산만 조회한다. 일반 화면에서는 투자자산을 눌러 상세 화면의 `AI 근거 분석`을 선택하면 답변, 근거 ID, 모델 실행 정보와 트리형 Trace를 확인할 수 있다.
 
