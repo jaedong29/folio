@@ -84,7 +84,11 @@ public class RefreshTokenService {
     repository.revokeAllByUserId(userId, Instant.now(clock));
   }
 
-  /** 만료된 지 오래된 토큰을 지운다. 회전·재사용 탐지는 실행 시점의 행 존재 여부에 의존하지 않으므로 안전하다. */
+  /**
+   * 만료된 지 오래된 토큰을 지운다.
+   *
+   * <p>삭제한 토큰으로는 이후 family 재사용 탐지를 할 수 없으므로, 현재 7일은 저장량과 탐지 기간 사이의 절충이다.
+   */
   @Scheduled(fixedRate = 86_400_000)
   @Transactional
   public void evictExpiredTokens() {

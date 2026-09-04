@@ -20,7 +20,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
 | 골든셋 Live 커버리지 확장 | fixture만으로 확장 가능한 4건(`stale-price`, `stale-fx`, `transaction-evidence`, `price-direction`)을 추가해 5개 → 9개로, 이어서 `searchSymbolEvidence` Agent Tool을 연결해 사용자 등록 근거 자료 7건을 추가해 9개 → 16개로 확장. 나머지 2개(`news-correlation`, `future-document`)는 멀티 Tool 체이닝·날짜 파싱이 필요해 포함하지 않음(아래 갭 참고) | `evidence/document/SymbolEvidenceService.java`, `SymbolEvidenceAnswerGuardrail.java`, `LiveEvaluationBatchQueueService.SUPPORTED_CASES` |
 | 거래 멱등성 키 | 매수·매도·입금·출금 4개 API가 `Idempotency-Key` 헤더를 필수로 받아, 네트워크 재시도·버튼 중복 클릭으로 같은 요청이 두 번 와도 한 번만 체결. DB unique 제약(`user_id`, `idempotency_key`)으로 동시 요청 경합도 막고, 같은 키에 다른 요청 본문이 오면 `409 IDEMPOTENCY_KEY_REUSED`로 거부. 24시간 뒤 자동 만료 | `domain/transaction/service/TransactionIdempotencyService.java`, `V9__idempotency_keys.sql` |
-| Refresh Token 정리 작업 | 만료된 지 7일 지난 Refresh Token 행을 매일 자동 삭제. 재사용 탐지(`rotate()`가 폐기 여부를 만료 여부보다 먼저 검사)에 잠시 쓰일 수 있어 만료 즉시가 아니라 유예 기간을 두고 지움 — 그전까지는 `refresh_tokens` 테이블이 무기한 쌓였음 | `global/security/RefreshTokenService.evictExpiredTokens()` |
+| Refresh Token 정리 작업 | 만료된 지 7일 지난 Refresh Token 행을 매일 자동 삭제. 무기한 적재는 막았지만, 삭제한 과거 토큰을 통한 family 재사용 탐지는 더는 할 수 없어 아래 보안 보완점이 남음 | `global/security/RefreshTokenService.evictExpiredTokens()` |
 | Graceful shutdown | SIGTERM 수신 시 새 요청을 받지 않고 진행 중인 요청을 최대 30초까지 기다린 뒤 종료. Docker 종료 유예는 35초로 두어 애플리케이션보다 먼저 SIGKILL하지 않게 함 | `application.yml`, `docker-compose.yml`, `deploy/aws/docker-compose.yml` |
 | 민감 액션 감사 로그 | 비밀번호 변경·회원 탈퇴 성공을 내부 사용자 id·액션·시각만 별도 append-only 테이블에 기록. 업무 변경과 같은 트랜잭션에 참여해 실패한 변경을 성공으로 기록하지 않고, users FK를 두지 않아 탈퇴 후에도 보존 | `global/audit`, `V10__audit_logs.sql`, `UserAccountService.java` |
 
@@ -33,11 +33,13 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 - **로그인 잠금·IP 제한이 메모리 상태다.** `LoginAttemptGuard`/`AuthRateLimitFilter` 둘 다 `ConcurrentHashMap`에 상태를 둔다. 단일 인스턴스에서는 문제없지만 인스턴스를 늘리면 인스턴스마다 카운터가 따로 놀아 우회가 쉬워진다 — Redis 같은 공유 저장소로 옮겨야 한다. **지금은 단일 인스턴스 MVP라 별도 인프라 없이 바로 동작하는 쪽을 택했다.**
 - **회원가입·이메일 중복확인에는 이메일 단위 잠금이 없다.** IP 단위 전역 제한(`AuthRateLimitFilter`)은 걸리지만, 특정 이메일을 겨냥한 시도를 막는 장치는 로그인에만 있다.
 - **Secrets가 환경변수뿐이다.** AWS Secrets Manager, Vault 같은 별도 비밀 관리 시스템 연동이 없다. **단일 인스턴스 개인 배포 규모에서는 환경변수로 충분해서다.**
+- **Refresh Token 정리가 재사용 탐지 기간도 7일로 줄인다.** 계속 회전 중인 family의 최신 토큰이 살아 있어도 삭제된 과거 토큰이 다시 오면 `familyId`를 복구할 수 없어 family 전체를 폐기하지 못한다. 토큰 hash row와 별도로 family 상태·절대 만료를 보존한 뒤에야 저장량과 재사용 탐지를 함께 해결할 수 있다.
 - **CORS 정책이 명시돼 있지 않다.** 지금은 정적 리소스와 API가 같은 origin에서 서빙되어 필요 없지만, 프런트엔드를 분리 배포하면 그때 반드시 설정해야 한다.
 
 ### 신뢰성 · 장애 대응
 
 - **다중 인스턴스를 전제하지 않는다.** News 요약·수집 Worker는 프로세스 내부 동기화로 중복 작업을 줄이는데, 이는 단일 인스턴스에서만 유효하다. 인스턴스를 늘리려면 DB 기반 claim 락이나 메시지 큐가 필요하다.
+- **거래 멱등 재시도의 응답 snapshot이 고정되지 않는다.** 같은 키는 중복 체결을 막고 같은 `transactionId`를 반환하지만, Asset snapshot은 재시도 시점의 현재 상태로 다시 만든다. 그 사이 다른 거래가 있으면 첫 응답과 값이 달라진다. 또한 256자 키가 입력 오류가 아니라 `409 IDEMPOTENCY_KEY_IN_PROGRESS`로 잘못 매핑된다.
 - **외부 API 호출에 Circuit Breaker가 없다.** Yahoo Finance·Binance·Upbit·NVIDIA NIM 호출이 각자의 timeout에만 의존하고, 연속 실패를 감지해 자동으로 호출을 줄이는 회로 차단기가 없다(Resilience4j 등 미도입).
 - **외부 API 실패 재시도 정책이 source마다 분리돼 있지 않다.** 뉴스 수집 실패는 안전한 오류 코드만 기록할 뿐, 지수 백오프나 source별 재시도 한도는 없다.
 
@@ -54,8 +56,17 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 ## 지금부터 순서대로 하나만 고른다면
 
-1. **다중 인스턴스 대비 분산 락.** 실제로 인스턴스를 늘릴 계획이 생기기 전까지는 우선순위가 낮다 — 지금 단일 인스턴스 MVP에는 과설계다. 늘리기로 하면 `LoginAttemptGuard`/`AuthRateLimitFilter`의 메모리 상태도 이때 같이 옮겨야 한다.
-2. **`news-correlation`/`future-document` 멀티 Tool 체이닝.** golden set 18개 중 마지막 2개. 비용·지연이 늘어나는 설계 변경이라 실제로 필요해지기 전까지는 미룬다.
+1. **거래 멱등성 계약 보완.** 키를 1~255자·공백 불가로 입구에서 검증하고, 최초 `TransactionResponse` snapshot을 저장해 이후 자산 변경·거래 삭제와 무관하게 같은 응답을 반환한다. 이미 완료로 표시한 기능이 실제 설명과 어긋나는 문제라 신규 기능보다 먼저 고친다.
+2. **Refresh Token family 수명 모델 분리.** 개별 token hash는 정리하되 family의 폐기 상태와 절대 만료는 별도 row에 남겨, 오래된 회전 토큰 재사용도 현재 family 폐기로 이어지게 한다. 보안 의미가 달라지는 변경이라 7일 숫자만 늘리는 임시처방은 피한다.
+3. **감사·Agent Trace·평가 기록의 보존 기간 확정.** 감사 로그를 만들었으므로 무기한 보존을 그대로 두지 말고, 실제 운영 정책과 개인정보 처리방침을 기준으로 기간·접근권한·삭제 작업을 정한다.
+4. **외부 API Circuit Breaker와 source별 재시도.** 단일 인스턴스에서도 Yahoo/Binance/Upbit/NIM 장애 전파를 줄이는 실효가 있다. retry 가능한 오류와 즉시 실패할 오류를 먼저 분리한 뒤 도입한다.
+
+CI의 `actions/setup-java@v5` 전환은 실제 GitHub 실행에 성공해 현재 기능 문제는 없다. 다만 2026-09-05 기준
+공식 최신 안정판은 v6이고 `actions/checkout`, `gradle/actions/setup-gradle`도 새 major가 있으므로, 위 정합성·보안
+수정 뒤 별도 유지보수 커밋으로 함께 갱신한다.
+
+다중 인스턴스 대비 분산 락과 `news-correlation`/`future-document` 멀티 Tool 체이닝은 실제 확장 계획이 생기기
+전까지 계속 미룬다. 지금 단일 인스턴스 개인 MVP에는 각각 인프라·비용·지연 대비 우선순위가 낮다.
 
 MyData 연동, 지갑 자동 연동, 주문 실행처럼 이 프로젝트의 문제 정의 자체를 벗어나는 확장은 이
 목록에 넣지 않았습니다. 각 기능의 세부 한계는 [README](../README.md)의 "의도적으로 남긴

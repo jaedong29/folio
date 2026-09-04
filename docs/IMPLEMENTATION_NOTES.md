@@ -130,7 +130,7 @@ private TransactionResponse apply(Asset asset, Transaction tx) {
 2. 없으면 → claim 시도(INSERT). 유니크 제약 위반이면 동시 요청 경합 → 409 IDEMPOTENCY_KEY_IN_PROGRESS
 3. 있고 요청 fingerprint가 다르면 → 409 IDEMPOTENCY_KEY_REUSED (다른 요청에 같은 키 재사용)
 4. 있고 아직 완료 안 됐으면(진행 중 요청이 있음) → 409 IDEMPOTENCY_KEY_IN_PROGRESS
-5. 있고 완료됐으면 → 그때 저장한 transactionId로 첫 응답을 재구성해 그대로 반환(재실행 없음)
+5. 있고 완료됐으면 → 그때 저장한 transactionId와 현재 Asset 상태로 응답을 재구성(재실행 없음)
 ```
 
 fingerprint는 `(operation, assetId, request 직렬화)`의 SHA-256이라, 같은 키라도 요청 내용이 다르면 재사용으로
@@ -158,6 +158,15 @@ Refresh Token 재사용 탐지(`RefreshTokenService.rotate()`, §3-2)에서는 �
 | 같은 키 + 다른 요청 본문 | `409 IDEMPOTENCY_KEY_REUSED`, 거래 row 추가 생성 안 됨 |
 | 서로 다른 키 + 같은 요청 본문 | 둘 다 정상 실행, 거래 row 2건, 수량 2배 — 의도된 별개 거래까지 막지는 않음 |
 
+후속 리뷰에서 **중복 체결 방지는 되지만 응답 전체가 고정되지는 않는다**는 한계를 확인했다. 첫 입금 응답의 자산
+수량이 100이었어도 다른 입금으로 현재 수량이 150이 된 뒤 첫 키를 재시도하면, 같은 `transactionId`와 현재 수량
+150이 함께 반환된다. `idempotency_keys`에는 응답 snapshot이 아니라 `result_transaction_id`만 저장하기 때문이다.
+따라서 현재 계약은 "한 번만 실행"에는 맞지만 문서에서 말한 "첫 응답 그대로"에는 못 미친다.
+
+또 `Idempotency-Key`의 길이·공백 검증이 컨트롤러에 없어 256자 키가 DB 길이 제약에서 실패한 뒤
+`DataIntegrityViolationException` catch에 잡혀 `409 IDEMPOTENCY_KEY_IN_PROGRESS`로 잘못 응답하는 것도 실 서버로
+재현했다. 두 항목은 `docs/PRODUCTION_READINESS.md`의 최우선 보완점으로 다시 올렸다.
+
 실 서버 기동 후 curl로도 재현했다: 헤더 없이 요청하면 `400 IDEMPOTENCY_KEY_REQUIRED`, 같은 키로 두 번 보내면
 잔액이 한 번만 반영되고 두 응답의 `transactionId`가 같다.
 
@@ -169,6 +178,9 @@ Refresh Token 재사용 탐지(`RefreshTokenService.rotate()`, §3-2)에서는 �
   → `MissingRequestHeaderException`을 `GlobalExceptionHandler`가 `400 IDEMPOTENCY_KEY_REQUIRED`로 매핑한다.
   프론트는 폼을 열 때 `crypto.randomUUID()`로 키를 하나 만들어 그 폼 세션 동안(에러 후 재시도 포함) 재사용하고,
   폼을 다시 열면 새 키를 만든다.
+- **"재시도 응답도 최초 응답과 완전히 같은가?"**
+  → 현재는 아니다. 거래 id와 거래 필드는 같지만 Asset snapshot은 재시도 시점의 현재 상태다. 응답 전체를
+  직렬화해 저장하거나 별도 결과 snapshot 컬럼을 두기 전까지는 "동일 응답"이라고 설명하면 안 된다.
 - **"다중 인스턴스에서도 안전한가?"**
   → 그렇다. claim은 DB unique 제약(INSERT 경합 시 `DataIntegrityViolationException`)에 의존하지 인메모리 상태를
   쓰지 않는다 — `docs/PRODUCTION_READINESS.md`의 "단일 인스턴스 메모리 상태" 갭(로그인 잠금 등)과 달리 별도
@@ -205,6 +217,11 @@ if (existing.isExpired(now)) { /* 그냥 만료 */ }
 즉 이미 만료된 토큰이라도 그게 **폐기된** 토큰이면 재사용 탐지가 여전히 의미 있는 신호(탈취 시도)를 준다. 만료
 직후 바로 지우면 이 신호를 잃는다. 7일은 이 프로젝트의 Refresh Token 수명(기본 14일, `refreshExpirationDays`)의
 절반 정도를 유예로 준 임의의 값이다 — 탐지 가치와 무한정 쌓이는 문제 사이의 절충이다.
+
+다만 후속 리뷰에서 이 절충의 보안 경계를 더 정확히 확인했다. 같은 family가 계속 회전하면 최신 토큰은 살아
+있을 수 있는데, 7일 유예가 지난 과거 token row를 삭제하면 그 토큰 재사용 시 `familyId`를 더는 알아낼 수 없어
+최신 토큰까지 폐기하지 못한다. 따라서 "7일 뒤에는 탐지 신호가 의미 없다"거나 "정리가 재사용 탐지에 영향을 주지
+않는다"고 설명하면 안 된다. 토큰 row는 정리하되 family 상태·절대 만료를 별도 보존하는 구조가 후속 보완점이다.
 
 ### 실제 확인 결과
 `@SpringBootTest` 통합 테스트로 실제 H2에 만료 10일 지난 토큰과 아직 유효한 토큰을 각각 저장하고
