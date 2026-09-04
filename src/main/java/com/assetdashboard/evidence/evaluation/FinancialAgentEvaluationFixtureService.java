@@ -4,8 +4,13 @@ import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.entity.AssetSource;
 import com.assetdashboard.domain.asset.entity.AssetType;
 import com.assetdashboard.domain.asset.repository.AssetRepository;
+import com.assetdashboard.domain.transaction.entity.Transaction;
+import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.infra.price.history.PriceHistoryPoint;
+import com.assetdashboard.infra.price.history.PriceHistoryQueryService;
+import com.assetdashboard.infra.price.history.PriceHistoryQuote;
 import com.assetdashboard.news.CollectedNewsItem;
 import com.assetdashboard.news.NewsCategory;
 import com.assetdashboard.news.NewsItem;
@@ -15,6 +20,9 @@ import com.assetdashboard.news.NewsSummaryDraft;
 import com.assetdashboard.news.NewsTrust;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +38,8 @@ public class FinancialAgentEvaluationFixtureService {
 
   private final AssetRepository assetRepository;
   private final NewsItemRepository newsItemRepository;
+  private final TransactionRepository transactionRepository;
+  private final PriceHistoryQueryService priceHistoryQueryService;
 
   @Transactional
   public EvaluationFixtureResponse create(Long userId, String caseId) {
@@ -39,6 +49,10 @@ public class FinancialAgentEvaluationFixtureService {
       case "missing-fx" -> createMissingFx(userId);
       case "missing-cost-basis" -> createMissingCostBasis(userId);
       case "symbol-official-news" -> createOfficialNews(userId);
+      case "stale-price" -> createStalePrice(userId);
+      case "stale-fx" -> createStaleFx(userId);
+      case "transaction-evidence" -> createTransactionEvidence(userId);
+      case "price-direction" -> createPriceDirection(userId);
       default ->
           throw new BusinessException(
               ErrorCode.INVALID_INPUT, "현재 생성 가능한 평가 fixture가 아닙니다: " + caseId);
@@ -98,6 +112,86 @@ public class FinancialAgentEvaluationFixtureService {
         asset,
         "missing-cost-basis",
         "현재 평가금액은 계산되지만 평균 매입 단가가 없어 평가손익은 계산할 수 없는 합성 자산입니다.");
+  }
+
+  private EvaluationFixtureResponse createStalePrice(Long userId) {
+    Asset asset =
+        Asset.create(userId, AssetType.STOCK, uniqueSymbol("STALEP"), "AI 평가용 가격 지연 자산", "KRW");
+    asset.initializePosition(new BigDecimal("2"), new BigDecimal("50000"), BigDecimal.ONE);
+    // 캐시 TTL(기본 15분)을 확실히 넘기도록 여유를 두고 갱신 시각을 과거로 되돌린다.
+    asset.updateCurrentPrice(
+        new BigDecimal("55000"), AssetSource.MANUAL, LocalDateTime.now().minusHours(2));
+    return saved(asset, "stale-price", "현재가가 캐시 TTL을 지나 stale로 표시되는 합성 자산입니다.");
+  }
+
+  private EvaluationFixtureResponse createStaleFx(Long userId) {
+    Asset asset =
+        Asset.create(userId, AssetType.STOCK, uniqueSymbol("STALEFX"), "AI 평가용 환율 지연 자산", "USD");
+    asset.initializePosition(BigDecimal.ONE, new BigDecimal("150"), new BigDecimal("1400"));
+    asset.updateCurrentPrice(new BigDecimal("160"), AssetSource.MANUAL);
+    asset.updateExchangeRate(new BigDecimal("1380"), LocalDateTime.now().minusHours(2));
+    return saved(asset, "stale-fx", "현재 환율이 캐시 TTL을 지나 stale로 표시되는 합성 자산입니다.");
+  }
+
+  private EvaluationFixtureResponse createTransactionEvidence(Long userId) {
+    Asset asset =
+        Asset.create(
+            userId, AssetType.STOCK, uniqueSymbol("MANYTX"), "AI 평가용 다건 거래 자산", "KRW");
+    asset.initializePosition(new BigDecimal("25"), new BigDecimal("10000"), BigDecimal.ONE);
+    asset.updateCurrentPrice(new BigDecimal("11000"), AssetSource.MANUAL);
+    Asset savedAsset = assetRepository.save(asset);
+
+    List<Transaction> transactions = new ArrayList<>();
+    LocalDateTime tradedAt = LocalDateTime.now().minusDays(30);
+    for (int i = 0; i < 25; i++) {
+      transactions.add(
+          Transaction.createBuy(
+              savedAsset.getId(),
+              BigDecimal.ONE,
+              new BigDecimal("10000").add(BigDecimal.valueOf(i * 10)),
+              BigDecimal.ONE,
+              null,
+              null,
+              "평가용 합성 거래 " + i,
+              tradedAt.plusDays(i)));
+    }
+    transactionRepository.saveAll(transactions);
+    return new EvaluationFixtureResponse(
+        savedAsset.getId(),
+        "transaction-evidence",
+        "최근 거래 표시 상한(20건)을 넘는 25건의 합성 거래가 있는 자산입니다.");
+  }
+
+  private EvaluationFixtureResponse createPriceDirection(Long userId) {
+    String symbol = uniqueSymbol("TREND");
+    Asset asset = Asset.create(userId, AssetType.STOCK, symbol, "AI 평가용 가격 추세 자산", "KRW");
+    asset.initializePosition(new BigDecimal("3"), new BigDecimal("100"), BigDecimal.ONE);
+    asset.updateCurrentPrice(new BigDecimal("112"), AssetSource.MANUAL);
+    Asset savedAsset = assetRepository.save(asset);
+
+    // Yahoo·Binance를 실제로 부르지 않고 7일치 상승 추세를 캐시에 직접 채운다.
+    long dayMillis = 24L * 60 * 60 * 1000;
+    long startEpochMilli = Instant.now().minusSeconds(6L * 24 * 60 * 60).toEpochMilli();
+    List<PriceHistoryPoint> points = new ArrayList<>();
+    BigDecimal[] closes = {
+      new BigDecimal("100"),
+      new BigDecimal("102"),
+      new BigDecimal("104"),
+      new BigDecimal("106"),
+      new BigDecimal("108"),
+      new BigDecimal("110"),
+      new BigDecimal("112")
+    };
+    for (int i = 0; i < closes.length; i++) {
+      points.add(new PriceHistoryPoint(startEpochMilli + i * dayMillis, closes[i]));
+    }
+    priceHistoryQueryService.seed(
+        AssetType.STOCK,
+        symbol,
+        new PriceHistoryQuote("Evaluation Fixture · 1D", LocalDateTime.now(), false, points));
+
+    return new EvaluationFixtureResponse(
+        savedAsset.getId(), "price-direction", "최근 7일 종가가 뚜렷하게 상승하는 합성 자산입니다.");
   }
 
   private EvaluationFixtureResponse createOfficialNews(Long userId) {

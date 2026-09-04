@@ -17,13 +17,28 @@ import org.springframework.transaction.annotation.Transactional;
 public class LiveEvaluationBatchQueueService {
 
   public static final int MAX_LIVE_CASES = 5;
-  public static final List<String> SUPPORTED_CASES =
+
+  /** caseIds를 명시하지 않았을 때 실행하는 기본 5건. 배치 상한(5)과 맞춰 그대로 유지한다. */
+  public static final List<String> DEFAULT_CASES =
       List.of(
           "fresh-valuation",
           "missing-price",
           "missing-fx",
           "missing-cost-basis",
           "symbol-official-news");
+
+  /** 실제로 fixture 구성이 끝나 실행 가능한 전체 caseId. 한 배치에는 이 중 최대 5건만 명시적으로 고를 수 있다. */
+  public static final List<String> SUPPORTED_CASES =
+      List.of(
+          "fresh-valuation",
+          "missing-price",
+          "missing-fx",
+          "missing-cost-basis",
+          "symbol-official-news",
+          "stale-price",
+          "stale-fx",
+          "transaction-evidence",
+          "price-direction");
 
   private final LiveEvaluationBatchJobRepository repository;
   private final FinancialAgentProperties properties;
@@ -38,7 +53,7 @@ public class LiveEvaluationBatchQueueService {
     if (!properties.enabled() || properties.apiKey() == null || properties.apiKey().isBlank()) {
       throw new BusinessException(ErrorCode.AI_AGENT_DISABLED);
     }
-    List<String> requested = request.caseIds().isEmpty() ? SUPPORTED_CASES : request.caseIds();
+    List<String> requested = request.caseIds().isEmpty() ? DEFAULT_CASES : request.caseIds();
     List<String> distinct = new LinkedHashSet<>(requested).stream().toList();
     if (distinct.size() != requested.size()) {
       throw new BusinessException(ErrorCode.INVALID_INPUT, "중복 caseId는 실행할 수 없습니다.");

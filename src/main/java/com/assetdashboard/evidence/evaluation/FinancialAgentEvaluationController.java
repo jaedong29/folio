@@ -32,7 +32,8 @@ public class FinancialAgentEvaluationController {
   @Operation(
       summary = "골든 케이스 합성 자산 생성",
       description =
-          "지원: fresh-valuation, missing-price, missing-fx, missing-cost-basis, symbol-official-news")
+          "지원: fresh-valuation, missing-price, missing-fx, missing-cost-basis, symbol-official-news, "
+              + "stale-price, stale-fx, transaction-evidence, price-direction")
   @PostMapping("/fixtures/{caseId}")
   public ResponseEntity<EvaluationFixtureResponse> createFixture(
       @CurrentUserId Long userId, @PathVariable String caseId) {
@@ -52,7 +53,9 @@ public class FinancialAgentEvaluationController {
 
   @Operation(
       summary = "최대 5건 실제 NIM 평가 배치 시작",
-      description = "confirmLiveCalls=true가 필요하며 비동기로 실행한다. 빈 caseIds는 지원되는 5건 전체를 뜻한다.")
+      description = "confirmLiveCalls=true가 필요하며 비동기로 실행한다. 빈 caseIds는 기본 5건(계산 4건 + "
+          + "symbol-official-news)을 뜻하며, 나머지 4건(stale-price, stale-fx, transaction-evidence, "
+          + "price-direction)은 caseIds에 명시해야 한다. 한 배치는 caseIds를 몇 개 지정하든 최대 5건까지다.")
   @PostMapping("/live-runs")
   public ResponseEntity<LiveEvaluationBatchResponse> startLiveRun(
       @CurrentUserId Long userId, @Valid @RequestBody LiveEvaluationBatchRequest request) {

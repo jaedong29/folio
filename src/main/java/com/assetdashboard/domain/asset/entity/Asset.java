@@ -528,9 +528,21 @@ public class Asset extends BaseTimeEntity {
    * @throws BusinessException 가격이 0 이하인 경우 {@code INVALID_INPUT}
    */
   public void updateCurrentPrice(BigDecimal price, AssetSource source) {
+    updateCurrentPrice(price, source, LocalDateTime.now());
+  }
+
+  /**
+   * 조회 시각과 함께 현재가를 갱신한다.
+   *
+   * @param price 원래 통화 기준 현재가
+   * @param source 이 값의 출처 (자동 조회면 {@code API}, 수동 입력이면 {@code MANUAL})
+   * @param updatedAt 외부 제공자에서 값을 확보한 시각
+   * @throws BusinessException 가격이 0 이하인 경우 {@code INVALID_INPUT}
+   */
+  public void updateCurrentPrice(BigDecimal price, AssetSource source, LocalDateTime updatedAt) {
     requirePositive(price, "현재가");
     this.currentPrice = price;
-    this.priceUpdatedAt = LocalDateTime.now();
+    this.priceUpdatedAt = updatedAt == null ? LocalDateTime.now() : updatedAt;
     this.source = source;
   }
 

@@ -29,18 +29,31 @@ class LiveEvaluationBatchQueueServiceTest {
   }
 
   @Test
-  void emptyCaseListUsesTheFiveSupportedCases() {
+  void emptyCaseListUsesTheDefaultFiveCases() {
     LiveEvaluationBatchResponse response =
         service.enqueue(7L, new LiveEvaluationBatchRequest(true, List.of()));
 
     assertThat(response.mode()).isEqualTo("LIVE_NIM");
     assertThat(response.status()).isEqualTo(LiveEvaluationBatchStatus.PENDING);
-    assertThat(response.caseIds()).containsExactlyElementsOf(LiveEvaluationBatchQueueService.SUPPORTED_CASES);
+    assertThat(response.caseIds())
+        .containsExactlyElementsOf(LiveEvaluationBatchQueueService.DEFAULT_CASES);
     assertThat(response.requestedCount()).isEqualTo(5);
     assertThat(response.rawQuestionStored()).isFalse();
     assertThat(response.rawAnswerStored()).isFalse();
     assertThat(response.reused()).isFalse();
     assertThat(response.maximumProviderCalls()).isEqualTo(10);
+  }
+
+  @Test
+  void supportsExplicitlyRequestingTheNewerFixtureCases() {
+    LiveEvaluationBatchResponse response =
+        service.enqueue(
+            7L,
+            new LiveEvaluationBatchRequest(
+                true, List.of("stale-price", "stale-fx", "transaction-evidence", "price-direction")));
+
+    assertThat(response.caseIds())
+        .containsExactly("stale-price", "stale-fx", "transaction-evidence", "price-direction");
   }
 
   @Test

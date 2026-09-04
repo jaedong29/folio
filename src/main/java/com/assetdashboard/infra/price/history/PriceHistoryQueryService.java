@@ -122,6 +122,14 @@ public class PriceHistoryQueryService {
     return points;
   }
 
+  /**
+   * local 프로필의 실제 NIM 평가 fixture가 Yahoo·Binance를 실제로 호출하지 않고 결정적인 가격 이력을 준비할
+   * 때만 쓴다. 캐시를 직접 채우므로 이후 {@link #getHistory}는 TTL이 지나기 전까지 이 값을 그대로 반환한다.
+   */
+  public void seed(AssetType type, String symbol, PriceHistoryQuote quote) {
+    cache.put(new SymbolKey(type, symbol), quote);
+  }
+
   private String sourceFor(AssetType type) {
     return type == AssetType.CRYPTO ? "Binance Spot · 1D" : "Yahoo Finance · 1D";
   }

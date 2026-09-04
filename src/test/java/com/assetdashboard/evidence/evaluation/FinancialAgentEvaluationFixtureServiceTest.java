@@ -9,6 +9,9 @@ import com.assetdashboard.evidence.tool.AssetEvidenceToolAdapter;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolResult;
 import com.assetdashboard.evidence.news.NewsEvidenceToolAdapter;
 import com.assetdashboard.evidence.news.NewsEvidenceToolResult;
+import com.assetdashboard.evidence.trend.PriceTrendDirection;
+import com.assetdashboard.evidence.trend.PriceTrendEvidenceToolAdapter;
+import com.assetdashboard.evidence.trend.PriceTrendEvidenceToolResult;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +29,7 @@ class FinancialAgentEvaluationFixtureServiceTest {
   @Autowired private FinancialAgentEvaluationFixtureService fixtureService;
   @Autowired private AssetEvidenceToolAdapter toolAdapter;
   @Autowired private NewsEvidenceToolAdapter newsToolAdapter;
+  @Autowired private PriceTrendEvidenceToolAdapter trendToolAdapter;
 
   @ParameterizedTest(name = "{0} fixture는 {1} 결론과 결정적 fact를 만든다")
   @MethodSource("fixtureCases")
@@ -57,6 +61,26 @@ class FinancialAgentEvaluationFixtureServiceTest {
     assertThat(result.payload().items()).hasSize(1);
   }
 
+  @org.junit.jupiter.api.Test
+  void createsPriceDirectionFixtureWithoutCallingYahooOrBinance() {
+    User user = userRepository.save(User.create("nim-eval-trend@example.com", "encoded", "eval"));
+
+    EvaluationFixtureResponse fixture = fixtureService.create(user.getId(), "price-direction");
+    PriceTrendEvidenceToolResult result = trendToolAdapter.execute(user.getId(), fixture.assetId());
+
+    assertThat(result.grounding().conclusion()).isEqualTo(EvidenceConclusion.CONFIRMED);
+    assertThat(result.payload().direction()).isEqualTo(PriceTrendDirection.UP);
+    assertThat(result.grounding().evidenceFacts())
+        .contains(
+            "PRICE_TREND_AVAILABLE",
+            "direction",
+            "returnRatePercent",
+            "startPrice",
+            "endPrice",
+            "pointCount",
+            "directionRule");
+  }
+
   private static Stream<Arguments> fixtureCases() {
     return Stream.of(
         Arguments.of(
@@ -74,6 +98,14 @@ class FinancialAgentEvaluationFixtureServiceTest {
         Arguments.of(
             "missing-cost-basis",
             EvidenceConclusion.PARTIAL,
-            Set.of("COST_BASIS_MISSING", "unrealizedPnlKrw=null")));
+            Set.of("COST_BASIS_MISSING", "unrealizedPnlKrw=null")),
+        Arguments.of(
+            "stale-price", EvidenceConclusion.PARTIAL, Set.of("PRICE_STALE", "priceUpdatedAt")),
+        Arguments.of(
+            "stale-fx", EvidenceConclusion.PARTIAL, Set.of("FX_STALE", "exchangeRateUpdatedAt")),
+        Arguments.of(
+            "transaction-evidence",
+            EvidenceConclusion.CONFIRMED,
+            Set.of("transactionId", "tradedAt", "totalCount", "truncated")));
   }
 }

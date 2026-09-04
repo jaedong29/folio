@@ -108,7 +108,7 @@ NVIDIA NIM의 OpenAI 호환 Chat Completions를 사용하는 첫 단일 자산 A
 
 현재 NIM Trial은 외부 서비스이므로 실제 실행 시 Tool payload가 NVIDIA로 전송된다. 개인 금융정보 대신 합성 데모 계정으로 먼저 검증해야 한다. 자동 테스트는 실제 NIM을 호출하지 않고 모의 HTTP 서버를 사용한다.
 
-계산 4건과 `symbol-official-news`는 local 전용 비동기 Live Runner로 최대 5케이스까지 한 번에 실행할 수 있다. 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 한 배치의 제공자 호출 상한은 10회다. `confirmLiveCalls=true`가 없으면 외부 모델을 호출하지 않으며, 동일 사용자의 활성 배치는 재사용해 중복 비용을 막는다. 배치에는 케이스별 Trace ID와 판정, hard failure, 지연·토큰·관찰된 모델 단계 수만 저장하고 질문·답변 원문은 저장하지 않는다. 나머지 13개 fixture의 실제 상태 구성은 아직 연결하지 않았다.
+local 전용 비동기 Live Runner는 caseId 9개(계산 6건 — `fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`, `stale-price`, `stale-fx`, `transaction-evidence` — 방향성 1건 `price-direction`, 뉴스 1건 `symbol-official-news`)의 실제 상태를 fixture로 구성해 최대 5케이스까지 한 번에 실행할 수 있다. `caseIds`를 비우면 기본 5건(계산 4건 + `symbol-official-news`)을 실행하고, 나머지 4건은 명시적으로 골라야 한다. 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 한 배치의 제공자 호출 상한은 요청 케이스 수 × 2다. `confirmLiveCalls=true`가 없으면 외부 모델을 호출하지 않으며, 동일 사용자의 활성 배치는 재사용해 중복 비용을 막는다. 배치에는 케이스별 Trace ID와 판정, hard failure, 지연·토큰·관찰된 모델 단계 수만 저장하고 질문·답변 원문은 저장하지 않는다. 나머지 9개 골든셋(`searchSymbolEvidence`, `getEvidenceDocument` 사례)은 그 두 Tool이 아직 Agent에 연결되지 않아 fixture 구성만으로는 확장할 수 없다.
 
 ### 공용 News와 Agent Tool
 
@@ -162,7 +162,7 @@ local 프로필에서는 실제 개인정보 대신 합성 자산으로 NIM 실�
 
 ## 4. 다음 구현 순서
 
-1. 현재 5개 사례를 지원하는 실제 NIM 배치를 나머지 13개 fixture까지 확장한다.
+1. `searchSymbolEvidence`, `getEvidenceDocument`를 Agent Tool로 연결한 뒤, 그 Tool을 쓰는 나머지 9개 골든셋의 fixture를 구성해 실제 NIM 배치를 18개 전체로 확장한다.
 2. DART·SEC·기업 IR처럼 재배포 조건이 명확한 공식 출처 Adapter를 하나씩 추가한다.
 3. 일반 언론은 전문 복제보다 제목·요약·원문 링크 중심의 라이선스 정책부터 확정한다.
 4. Prompt Injection fixture를 공용 News Tool 입력까지 통과시키는 회귀 테스트를 추가한다.
