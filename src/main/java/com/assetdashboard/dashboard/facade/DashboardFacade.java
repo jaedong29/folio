@@ -2,17 +2,24 @@ package com.assetdashboard.dashboard.facade;
 
 import com.assetdashboard.dashboard.dto.DashboardResponse;
 import com.assetdashboard.dashboard.dto.DashboardResponse.CashSummary;
+import com.assetdashboard.dashboard.dto.DashboardResponse.DailyPnl;
 import com.assetdashboard.dashboard.dto.DashboardResponse.InvestmentSummary;
+import com.assetdashboard.dashboard.dto.DashboardResponse.MarketRates;
 import com.assetdashboard.dashboard.dto.DashboardResponse.RecentTransaction;
+import com.assetdashboard.dashboard.snapshot.DailyPnlResult;
+import com.assetdashboard.dashboard.snapshot.DailyPnlService;
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.service.AssetService;
 import com.assetdashboard.domain.transaction.entity.Transaction;
 import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.infra.price.PriceProperties;
+import com.assetdashboard.infra.price.fx.FxRateQueryService;
+import com.assetdashboard.infra.price.fx.FxRateQuote;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -38,6 +45,8 @@ public class DashboardFacade {
   private final AssetService assetService;
   private final TransactionRepository transactionRepository;
   private final PriceProperties priceProperties;
+  private final FxRateQueryService fxRateQueryService;
+  private final DailyPnlService dailyPnlService;
 
   /**
    * 대시보드 응답을 조립한다.
@@ -49,34 +58,132 @@ public class DashboardFacade {
    * @return 대시보드 응답
    */
   public DashboardResponse getDashboard(Long userId) {
-    List<Asset> assets = assetService.getActiveAssetsWithFreshPrice(userId);
+    return getDashboard(userId, false);
+  }
+
+  /**
+   * Dashboard 응답을 조립한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param force true 면 시세 TTL과 무관하게 외부 조회를 시도한다
+   * @return Dashboard 응답
+   */
+  public DashboardResponse getDashboard(Long userId, boolean force) {
+    List<Asset> assets = assetService.getActiveAssetsWithFreshPrice(userId, force);
 
     List<Asset> investments = assets.stream().filter(a -> a.getType().isInvestment()).toList();
     List<Asset> cashLike = assets.stream().filter(a -> a.getType().isCashLike()).toList();
 
-    BigDecimal investmentValuation = sumValuation(investments);
+    boolean investmentValuationComplete =
+        investments.stream().allMatch(asset -> asset.getValuation() != null);
+    BigDecimal investmentValuationSum = sumValuation(investments);
+    BigDecimal investmentValuation =
+        investmentValuationComplete ? investmentValuationSum : null;
+    boolean costBasisMissing = investments.stream().anyMatch(asset -> asset.getCost() == null);
     BigDecimal investmentCost =
-        investments.stream().map(Asset::getCost).reduce(BigDecimal.ZERO, BigDecimal::add);
-    BigDecimal unrealizedPnl = investmentValuation.subtract(investmentCost);
-    BigDecimal cashValuation = sumValuation(cashLike);
+        costBasisMissing
+            ? null
+            : investments.stream().map(Asset::getCost).reduce(BigDecimal.ZERO, BigDecimal::add);
+    boolean investmentExchangeRateMissing =
+        investments.stream().anyMatch(Asset::isValuationBlockedByExchangeRate);
+    BigDecimal unrealizedPnl =
+        !investmentValuationComplete || investmentExchangeRateMissing || costBasisMissing
+            ? null
+            : investmentValuationSum.subtract(investmentCost);
+    boolean cashValuationComplete = cashLike.stream().allMatch(asset -> asset.getValuation() != null);
+    BigDecimal cashValuationSum = sumValuation(cashLike);
+    BigDecimal cashValuation = cashValuationComplete ? cashValuationSum : null;
+    BigDecimal calculatedTotalAssetKrw =
+        investmentValuationSum
+            .add(cashValuationSum)
+            .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    boolean valuationComplete = assets.stream().allMatch(asset -> asset.getValuation() != null);
+    BigDecimal totalAssetKrw = valuationComplete ? calculatedTotalAssetKrw : null;
+    DailyPnlResult dailyPnl =
+        dailyPnlService.calculate(userId, calculatedTotalAssetKrw, assets, valuationComplete);
+    boolean exchangeRateMissing =
+        assets.stream().anyMatch(Asset::isValuationBlockedByExchangeRate);
+    MarketRates marketRates = findMarketRates(assets, force);
+    boolean hasPortfolioContent =
+        assets.stream()
+            .anyMatch(
+                asset ->
+                    !asset.isDefaultSettlementAsset()
+                        || asset.getQuantity().compareTo(BigDecimal.ZERO) > 0);
 
     InvestmentSummary investmentSummary =
         new InvestmentSummary(
             investmentValuation,
             investmentCost,
             unrealizedPnl,
-            pnlRate(unrealizedPnl, investmentCost),
+            investmentExchangeRateMissing || costBasisMissing
+                ? null
+                : pnlRate(unrealizedPnl, investmentCost),
             // 삭제된 자산의 실현손익까지 합산한다. 그래야 "지금까지 얼마 벌었나"에 정확히 답할 수 있다.
             assetService.getTotalRealizedPnl(userId));
 
     return new DashboardResponse(
-        investmentValuation.add(cashValuation).setScale(MONEY_SCALE, RoundingMode.HALF_UP),
+        totalAssetKrw,
+        DailyPnl.from(dailyPnl),
         investmentSummary,
         new CashSummary(cashValuation),
+        marketRates,
         assetService.calculateAllocation(assets),
         findRecentTransactions(assets),
-        !assets.isEmpty(),
-        investments.stream().anyMatch(a -> a.isPriceStale(priceProperties.cacheTtlMinutes())));
+        hasPortfolioContent,
+        investments.stream().anyMatch(a -> a.isPriceStale(priceProperties.cacheTtlMinutes())),
+        exchangeRateMissing);
+  }
+
+  /**
+   * 현재 대시보드 자산 조회에서 확보한 시장 환율을 카드용으로 추출한다.
+   *
+   * <p>CRYPTO 시세는 {@code CryptoPriceProvider}가 Binance 가격과 Upbit KRW-USDT 가격을 함께 조회하므로,
+   * 별도 환율 API를 한 번 더 호출하지 않고 해당 Asset의 최신 환율을 재사용한다.
+   */
+  private MarketRates findMarketRates(List<Asset> assets, boolean force) {
+    FxRateQuote usd = findMarketRate("USD", assets, force).orElse(null);
+    FxRateQuote usdt = findMarketRate("USDT", assets, force).orElse(null);
+    return new MarketRates(
+        usd == null ? null : usd.krwRate(),
+        usd == null ? FxRateQueryService.USD_SOURCE : usd.source(),
+        usd == null ? findStoredRateTime("USD", assets) : usd.fetchedAt(),
+        usdt == null ? null : usdt.krwRate(),
+        usdt == null ? FxRateQueryService.USDT_SOURCE : usdt.source(),
+        usdt == null ? findStoredRateTime("USDT", assets) : usdt.fetchedAt());
+  }
+
+  private Optional<FxRateQuote> findMarketRate(
+      String currency, List<Asset> assets, boolean force) {
+    boolean alreadyRefreshed =
+        assets.stream().anyMatch(asset -> currency.equalsIgnoreCase(asset.getCurrency()));
+    Optional<FxRateQuote> quote =
+        fxRateQueryService.fetchWithFallback(currency, force && !alreadyRefreshed);
+    if (quote.isPresent()) {
+      return quote;
+    }
+    return assets.stream()
+        .filter(asset -> currency.equalsIgnoreCase(asset.getCurrency()))
+        .filter(asset -> asset.getCurrentExchangeRate() != null)
+        .findFirst()
+        .map(
+            asset ->
+                new FxRateQuote(
+                    currency,
+                    asset.getCurrentExchangeRate(),
+                    "마지막 저장값",
+                    asset.getExchangeRateUpdatedAt() == null
+                        ? asset.getPriceUpdatedAt()
+                        : asset.getExchangeRateUpdatedAt()));
+  }
+
+  private java.time.LocalDateTime findStoredRateTime(String currency, List<Asset> assets) {
+    return assets.stream()
+        .filter(asset -> currency.equalsIgnoreCase(asset.getCurrency()))
+        .map(Asset::getExchangeRateUpdatedAt)
+        .filter(java.util.Objects::nonNull)
+        .findFirst()
+        .orElse(null);
   }
 
   /**
@@ -107,7 +214,7 @@ public class DashboardFacade {
                   tx.getId(),
                   tx.getAssetId(),
                   asset.getName(),
-                  asset.getSymbol(),
+                  asset.getDisplaySymbol(),
                   tx.getType(),
                   tx.getQuantity(),
                   tx.getPrice(),
