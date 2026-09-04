@@ -87,6 +87,9 @@ public enum ErrorCode {
   /** 제공자가 Tool 또는 최종 답변 계약과 다른 응답을 반환한 경우. */
   AI_PROVIDER_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "AI 모델 응답 형식이 올바르지 않습니다."),
 
+  /** 오늘의 NIM 호출·토큰 예산을 초과해 추가 호출을 막은 경우. */
+  AI_BUDGET_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "오늘의 AI 사용 한도를 초과했습니다."),
+
   /** 이미 가입된 이메일로 회원가입을 시도한 경우. */
   DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
 

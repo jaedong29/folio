@@ -70,6 +70,9 @@ app:
     read-timeout-millis: ${APP_AI_READ_TIMEOUT_MILLIS:45000}
     # 일반 화면은 결정적 Router로 한 번만 호출하고, true 또는 평가 API에서는 모델 Tool 선택도 검증한다.
     strict-tool-selection: ${APP_AI_STRICT_TOOL_SELECTION:false}
+    # Agent와 News 요약이 하루 단위로 공유하는 NIM 호출·토큰 예산. 0 이하면 해당 항목은 무제한이다.
+    daily-call-limit: ${APP_AI_DAILY_CALL_LIMIT:200}
+    daily-token-limit: ${APP_AI_DAILY_TOKEN_LIMIT:200000}
 
 logging:
   level:

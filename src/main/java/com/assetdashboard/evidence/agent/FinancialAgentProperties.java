@@ -11,4 +11,6 @@ public record FinancialAgentProperties(
     String model,
     int connectTimeoutMillis,
     int readTimeoutMillis,
-    boolean strictToolSelection) {}
+    boolean strictToolSelection,
+    int dailyCallLimit,
+    long dailyTokenLimit) {}

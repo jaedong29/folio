@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -55,6 +56,7 @@ class FinancialEvidenceAgentServiceTest {
       mock(FinancialEvidenceGoldenSetLoader.class);
   private final FinancialEvidenceEvaluationHarness evaluationHarness =
       mock(FinancialEvidenceEvaluationHarness.class);
+  private final LlmUsageBudgetService budgetService = mock(LlmUsageBudgetService.class);
   private final FinancialEvidenceAgentService service =
       new FinancialEvidenceAgentService(
           modelClient,
@@ -65,7 +67,9 @@ class FinancialEvidenceAgentServiceTest {
               "nim-model",
               1000,
               1000,
-              true),
+              true,
+              0,
+              0),
           intentClassifier,
           toolAdapter,
           trendToolAdapter,
@@ -75,7 +79,8 @@ class FinancialEvidenceAgentServiceTest {
           new GroundedAgentRunAssembler(new EvidenceConclusionPolicy()),
           traceService,
           goldenSetLoader,
-          evaluationHarness);
+          evaluationHarness,
+          budgetService);
 
   @Test
   void usesApplicationGroundingAndRecordsTotals() {
@@ -414,7 +419,9 @@ class FinancialEvidenceAgentServiceTest {
                 "nim-model",
                 1000,
                 1000,
-                false),
+                false,
+                0,
+                0),
             intentClassifier,
             toolAdapter,
             trendToolAdapter,
@@ -424,7 +431,8 @@ class FinancialEvidenceAgentServiceTest {
             new GroundedAgentRunAssembler(new EvidenceConclusionPolicy()),
             traceService,
             goldenSetLoader,
-            evaluationHarness);
+            evaluationHarness,
+            budgetService);
     String question = "이 자산의 최신 뉴스를 알려줘";
     NewsEvidenceResponse payload =
         new NewsEvidenceResponse(
@@ -456,5 +464,20 @@ class FinancialEvidenceAgentServiceTest {
     assertThat(runCaptor.getValue().steps())
         .extracting(step -> step.name())
         .contains("deterministicIntentRoute", "deterministicUnavailableAnswer");
+  }
+
+  @Test
+  void blocksAskWithoutCallingModelWhenDailyBudgetIsExceeded() {
+    doThrow(new BusinessException(ErrorCode.AI_BUDGET_EXCEEDED))
+        .when(budgetService)
+        .ensureWithinBudget();
+
+    assertThatThrownBy(() -> service.ask(7L, 42L, "AAPL 평가금액 알려줘"))
+        .isInstanceOf(BusinessException.class)
+        .extracting(e -> ((BusinessException) e).getErrorCode())
+        .isEqualTo(ErrorCode.AI_BUDGET_EXCEEDED);
+
+    verify(modelClient, never()).requestTool(any(), any(), any());
+    verify(modelClient, never()).composeGroundedAnswer(any(), any(), any(), any());
   }
 }

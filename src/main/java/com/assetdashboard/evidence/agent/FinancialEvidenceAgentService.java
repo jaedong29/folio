@@ -51,6 +51,7 @@ public class FinancialEvidenceAgentService {
   private final AgentTraceService traceService;
   private final FinancialEvidenceGoldenSetLoader goldenSetLoader;
   private final FinancialEvidenceEvaluationHarness evaluationHarness;
+  private final LlmUsageBudgetService budgetService;
 
   public FinancialAgentResponse ask(Long userId, Long assetId, String question) {
     Execution execution = execute(userId, assetId, question, properties.strictToolSelection());
@@ -91,7 +92,7 @@ public class FinancialEvidenceAgentService {
     String requiredToolName = intent.requiredToolName();
     AgentToolCallResponse toolCall =
         forceModelToolSelection
-            ? modelClient.requestTool(question, assetId, requiredToolName)
+            ? requestToolWithBudget(question, assetId, requiredToolName)
             : deterministicToolCall(assetId, requiredToolName);
     validateToolCall(toolCall, assetId, requiredToolName);
 
@@ -130,6 +131,32 @@ public class FinancialEvidenceAgentService {
         toolExecution.grounding().referenceIds(),
         intent,
         toolExecution.grounding().toolName());
+  }
+
+  private AgentToolCallResponse requestToolWithBudget(
+      String question, Long assetId, String requiredToolName) {
+    budgetService.ensureWithinBudget();
+    AgentToolCallResponse response = modelClient.requestTool(question, assetId, requiredToolName);
+    recordModelUsage(response.tokenUsage());
+    return response;
+  }
+
+  private AgentModelResponse composeGroundedAnswerWithBudget(
+      String question,
+      AgentToolCallResponse toolCall,
+      Object evidence,
+      EvidenceConclusion answerConclusion) {
+    budgetService.ensureWithinBudget();
+    AgentModelResponse response =
+        modelClient.composeGroundedAnswer(question, toolCall, evidence, answerConclusion);
+    recordModelUsage(response.tokenUsage());
+    return response;
+  }
+
+  private void recordModelUsage(AgentTokenUsage usage) {
+    budgetService.recordUsage(
+        usage.inputTokens() == null ? 0 : usage.inputTokens(),
+        usage.outputTokens() == null ? 0 : usage.outputTokens());
   }
 
   private ToolExecution executeTool(Long userId, Long assetId, String toolName) {
@@ -176,7 +203,7 @@ public class FinancialEvidenceAgentService {
           decision.violationCode());
     }
     AgentModelResponse modelAnswer =
-        modelClient.composeGroundedAnswer(
+        composeGroundedAnswerWithBudget(
             question,
             toolCall,
             toolExecution.payload(),

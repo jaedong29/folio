@@ -42,6 +42,7 @@ POST /api/news/refresh
 - 일반 Agent 질문은 결정적 Tool 라우팅으로 모델 호출을 한 번으로 제한
 - News 요약은 사용자별 요청이 아니라 새 공용 자료당 한 번만 실행
 - 같은 `contentHash`는 완료 요약을 재사용하고 원문 변경 시에만 재요약
+- Financial Evidence Agent와 하루 NIM 호출·토큰 예산을 공유하며, 초과 시 `AI_BUDGET_EXCEEDED`로 실패해 원문 excerpt로 fallback
 
 `APP_AI_ENABLED=true`이면 기본적으로 요약 Worker도 활성화된다. Agent는 사용하되 자동 요약 비용을 막으려면 `APP_NEWS_SUMMARY_ENABLED=false`를 설정한다. AI가 꺼졌거나 요약에 실패해도 뉴스 조회와 공식 원문 링크는 정상 동작한다.
 

@@ -22,7 +22,8 @@ class LiveEvaluationBatchQueueServiceTest {
   @BeforeEach
   void setUp() {
     FinancialAgentProperties properties =
-        new FinancialAgentProperties(true, "https://nim.test/v1", "test-key", "model", 1, 1, false);
+        new FinancialAgentProperties(
+            true, "https://nim.test/v1", "test-key", "model", 1, 1, false, 0, 0);
     service = new LiveEvaluationBatchQueueService(repository, properties);
     when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
   }

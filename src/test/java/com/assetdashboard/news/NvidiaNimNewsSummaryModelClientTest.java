@@ -57,7 +57,7 @@ class NvidiaNimNewsSummaryModelClientTest {
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     FinancialAgentProperties ai =
         new FinancialAgentProperties(
-            true, "https://nim.test/v1", "test-key", "nemotron", 1000, 1000, false);
+            true, "https://nim.test/v1", "test-key", "nemotron", 1000, 1000, false, 0, 0);
     NewsProperties news =
         new NewsProperties(true, 1000, 1000, 360, 10, 1000, true, 1200, 6000);
     NvidiaNimNewsSummaryModelClient client =

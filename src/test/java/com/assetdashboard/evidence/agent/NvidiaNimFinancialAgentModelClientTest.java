@@ -40,7 +40,9 @@ class NvidiaNimFinancialAgentModelClientTest {
             "nvidia/nemotron-3.5-lightning-30b-a3b",
             1000,
             1000,
-            true);
+            true,
+            0,
+            0);
     NvidiaNimFinancialAgentModelClient client =
         new NvidiaNimFinancialAgentModelClient(
             builder.build(), new ObjectMapper().findAndRegisterModules(), properties);
@@ -128,7 +130,9 @@ class NvidiaNimFinancialAgentModelClientTest {
             "nvidia/nemotron-3.5-lightning-30b-a3b",
             1000,
             1000,
-            true);
+            true,
+            0,
+            0);
     NvidiaNimFinancialAgentModelClient client =
         new NvidiaNimFinancialAgentModelClient(
             builder.build(), new ObjectMapper().findAndRegisterModules(), properties);

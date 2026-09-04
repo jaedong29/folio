@@ -96,6 +96,7 @@ NVIDIA NIM의 OpenAI 호환 Chat Completions를 사용하는 첫 단일 자산 A
 - 모델이 경로의 `assetId`와 다른 값을 Tool 인자로 반환하면 호출을 거부한다.
 - 첫 모델 호출은 질문 의도에 맞는 단일 Tool을 강제하고, 두 번째 호출은 추가 Tool 사용을 금지한다.
 - 일반 화면은 비용과 지연을 줄이기 위해 결정적 라우터 뒤 한 번만 NIM을 호출한다. 평가 API는 Tool Calling 배관 검증을 위해 두 번 호출한다.
+- 이 Agent와 News 요약은 하루 호출 수·토큰 사용량을 `LlmUsageBudgetService` 카운터 하나로 공유한다. `APP_AI_DAILY_CALL_LIMIT`/`APP_AI_DAILY_TOKEN_LIMIT`을 넘으면 실제 NIM 호출 전에 `AI_BUDGET_EXCEEDED`로 막고, `GET /api/ai/usage/today`에서 현재 사용량을 확인한다.
 - `enable_thinking=false`, `stream=false`로 구조화된 응답만 처리한다.
 - 모델은 `finalAnswer`만 만들며 conclusion과 evidenceFacts는 Tool 결과에서 결정한다.
 - 방향성 질문의 결론은 포트폴리오 평가손익이 아니라 최근 가격 이력의 상태로 결정한다.

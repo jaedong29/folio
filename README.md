@@ -232,6 +232,8 @@ APP_AI_ENABLED=true ./gradlew bootRun
 
 API 키는 `application.yml`, `.env`, 명령행 인자나 Git에 저장하지 않는다. 실행 API는 `POST /api/ai/agent/assets/{assetId}/ask`이며 인증된 사용자의 경로 자산만 조회한다. 일반 화면에서는 투자자산을 눌러 상세 화면의 `AI 근거 분석`을 선택하면 답변, 근거 ID, 모델 실행 정보와 트리형 Trace를 확인할 수 있다.
 
+Financial Evidence Agent와 News 요약은 하루 NIM 호출 수·토큰 사용량을 하나의 카운터로 공유한다. `APP_AI_DAILY_CALL_LIMIT`(기본 200회)이나 `APP_AI_DAILY_TOKEN_LIMIT`(기본 200,000토큰)을 넘으면 그날 남은 호출은 실제 NIM에 닿기 전에 `429 AI_BUDGET_EXCEEDED`로 막힌다. 뉴스 요약은 이 경우도 다른 실패와 똑같이 원문 excerpt로 fallback한다. 현재 누적치는 `GET /api/ai/usage/today`에서 확인한다. 값을 `0` 이하로 두면 해당 항목은 무제한이다.
+
 실제 NIM 응답을 단일 자산 골든케이스로 평가하려면 Swagger에서 local 전용 API를 순서대로 호출한다. 합성 fixture를 제공하는 caseId는 `fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`다.
 
 반복 검증은 `POST /api/ai/evaluations/live-runs`에 `{"confirmLiveCalls":true,"caseIds":[]}`를 보내면 된다. 빈 목록은 계산 4건과 `symbol-official-news`를 합친 5건을 뜻하며, HTTP 요청과 분리된 Worker가 순차 실행한다. 한 배치는 최대 5케이스로 제한되고 같은 사용자의 활성 배치는 재사용한다. 평가 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 5케이스의 최대 제공자 호출 수는 10회이며, 응답은 이 상한과 Trace에서 관찰된 모델 단계 수를 함께 보여준다. `GET /api/ai/evaluations/live-runs/{batchId}`에서 케이스별 Trace, 통과 여부, hard failure, 평균·P95 지연, 총 토큰을 확인한다. 질문·답변 원문은 배치 테이블에 저장하지 않는다.
@@ -348,6 +350,7 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 | `GET` | `/api/ai/evidence/assets/{id}/price-trend` | 최근 일별 가격·변화율·방향 판정 근거 |
 | `POST` | `/api/ai/agent/assets/{id}/ask` | 질문 의도별 읽기 전용 Tool 실행과 근거 답변 |
 | `GET` | `/api/ai/traces/{traceId}` | 원문 없는 Agent 실행 트리 조회 |
+| `GET` | `/api/ai/usage/today` | 오늘 NIM 호출 수·토큰 사용량과 설정된 예산 조회 |
 | `POST` | `/api/assets/{id}/evidence-documents` | symbol 공식자료·뉴스·메모 등록 |
 | `GET` | `/api/assets/{id}/evidence-documents` | 등록 자료 메타데이터 목록 |
 | `GET` | `/api/assets/{id}/evidence-documents/search?query=` | symbol 자료 키워드 검색 |

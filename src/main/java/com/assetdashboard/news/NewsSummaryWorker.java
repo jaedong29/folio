@@ -1,5 +1,6 @@
 package com.assetdashboard.news;
 
+import com.assetdashboard.evidence.agent.LlmUsageBudgetService;
 import com.assetdashboard.global.exception.BusinessException;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class NewsSummaryWorker {
   private final NewsSummaryLifecycleService lifecycleService;
   private final NewsSummaryModelClient modelClient;
   private final NewsSummaryGuardrail guardrail;
+  private final LlmUsageBudgetService budgetService;
 
   @EventListener(ApplicationReadyEvent.class)
   public void recoverInterruptedJobs() {
@@ -36,7 +38,9 @@ public class NewsSummaryWorker {
     }
     ClaimedNewsSummary claimed = candidate.get();
     try {
+      budgetService.ensureWithinBudget();
       NewsSummaryDraft draft = modelClient.summarize(claimed);
+      budgetService.recordUsage(draft.inputTokens(), draft.outputTokens());
       Optional<String> violation = guardrail.validate(claimed, draft);
       if (violation.isPresent()) {
         lifecycleService.fail(claimed, violation.get(), draft);
