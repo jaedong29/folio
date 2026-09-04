@@ -29,6 +29,7 @@ const state = {
   newsCategory: '',
   newsQuery: '',
   newsRefreshTimer: null,
+  newsSummaryTimer: null,
   detailAssetId: null,
   refreshPromise: null,
   krSecurities: null,
@@ -280,6 +281,8 @@ function logout() {
   // JWT 는 서버가 상태를 저장하지 않으므로, 로그아웃은 클라이언트가 토큰을 지우는 것으로 끝난다(PRD 4-1).
   clearTimeout(state.newsRefreshTimer);
   state.newsRefreshTimer = null;
+  clearTimeout(state.newsSummaryTimer);
+  state.newsSummaryTimer = null;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(NICK_KEY);
   $('app-view').hidden = true;
@@ -649,6 +652,7 @@ function setPrimaryNavigation(page) {
 }
 
 async function showAnalysis(pushHistory) {
+  stopNewsSummaryPolling();
   if (!state.dashboard) {
     toast('대시보드를 먼저 불러오고 있습니다');
     return;
@@ -668,6 +672,7 @@ async function showAnalysis(pushHistory) {
 }
 
 function showOverview() {
+  stopNewsSummaryPolling();
   $('analysis-page').hidden = true;
   $('activity-page').hidden = true;
   $('news-page').hidden = true;
@@ -677,6 +682,7 @@ function showOverview() {
 }
 
 async function showActivity(pushHistory) {
+  stopNewsSummaryPolling();
   if (!state.assets.length) {
     toast('대시보드를 먼저 불러오고 있습니다');
     return;
@@ -742,6 +748,8 @@ $('news-search').addEventListener('search', async () => {
 $('news-refresh-btn').addEventListener('click', requestNewsRefresh);
 
 async function loadNewsData() {
+  clearTimeout(state.newsSummaryTimer);
+  state.newsSummaryTimer = null;
   $('news-feed-list').innerHTML = '<div class="empty-row">뉴스 피드를 불러오는 중…</div>';
   const params = new URLSearchParams({ scope: state.newsScope, limit: '30' });
   if (state.newsCategory) params.set('category', state.newsCategory);
@@ -753,6 +761,9 @@ async function loadNewsData() {
     ]);
     renderNewsSourceStatus(sources[0]);
     renderNewsFeed(feed);
+    if (feed.summaryEnabled && feed.pendingSummaryCount > 0 && location.hash === '#news') {
+      state.newsSummaryTimer = setTimeout(loadNewsData, 3000);
+    }
   } catch (error) {
     $('news-feed-list').innerHTML = `<div class="empty-row">${escapeHtml(error.message)}</div>`;
     $('news-source-status').textContent = '뉴스 상태를 확인하지 못했습니다.';
@@ -792,15 +803,39 @@ function renderNewsFeed(feed) {
   $('news-feed-list').innerHTML = items.map((item) => {
     const symbolTags = (item.symbols || []).map((symbol) => `<span class="news-symbol">${escapeHtml(symbol)}</span>`).join('');
     const topics = (item.topics || []).slice(0, 3).map((topic) => `<span>${escapeHtml(newsTopicLabel(topic))}</span>`).join('');
+    const hasSummary = item.summaryStatus === 'COMPLETED' && item.summaryKo;
+    const summaryLabels = {
+      COMPLETED: 'AI 요약',
+      RUNNING: 'AI 요약 중',
+      PENDING: 'AI 요약 대기',
+      FAILED: '원문 표시',
+    };
+    const summaryLabel = !feed.summaryEnabled && !hasSummary
+      ? '원문 표시'
+      : summaryLabels[item.summaryStatus] || '원문 표시';
+    const summaryTitle = hasSummary
+      ? `${item.summaryModel || 'model'} · ${item.summaryPromptVersion || 'prompt'}`
+      : '요약을 사용할 수 없어 공식 원문 일부를 표시합니다.';
+    const primaryText = hasSummary
+      ? item.summaryKo
+      : item.excerpt || '원문에서 세부 내용을 확인할 수 있습니다.';
     return `
       <article class="news-item-card">
         <div class="news-item-meta">
           <span class="news-trust ${item.trust === 'VERIFIED_OFFICIAL' ? 'verified' : ''}">${item.trust === 'VERIFIED_OFFICIAL' ? '공식 확인' : '출처 메타데이터'}</span>
           ${symbolTags}
+          <span class="news-summary-status news-summary-${String(item.summaryStatus || 'FAILED').toLowerCase()}" title="${escapeHtml(summaryTitle)}">${summaryLabel}</span>
           <time>${escapeHtml(formatNewsDate(item.publishedAt))}</time>
         </div>
         <h2><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a></h2>
-        <p>${escapeHtml(item.excerpt || '원문에서 세부 내용을 확인할 수 있습니다.')}</p>
+        <p class="news-summary-copy">${escapeHtml(primaryText)}</p>
+        ${hasSummary ? `<p class="news-significance"><span>기술적 의미</span>${escapeHtml(item.significanceKo)}</p>` : ''}
+        <p class="news-price-boundary"><span>가격 직접 영향</span>이 자료만으로는 확인할 수 없습니다.</p>
+        ${hasSummary && item.excerpt ? `
+          <details class="news-original">
+            <summary>공식 원문 일부 보기</summary>
+            <p>${escapeHtml(item.excerpt)}</p>
+          </details>` : ''}
         <div class="news-item-footer">
           <strong>${escapeHtml(item.publisher)}</strong>
           <div class="news-topics">${topics}</div>
@@ -808,6 +843,11 @@ function renderNewsFeed(feed) {
         </div>
       </article>`;
   }).join('');
+}
+
+function stopNewsSummaryPolling() {
+  clearTimeout(state.newsSummaryTimer);
+  state.newsSummaryTimer = null;
 }
 
 function newsTopicLabel(topic) {

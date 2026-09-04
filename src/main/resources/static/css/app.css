@@ -1070,14 +1070,26 @@ input:focus, select:focus {
 .news-item-card:hover { border-color: rgba(109,140,255,.24); transform: translateY(-1px); }
 .news-item-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .news-item-meta time { margin-left: auto; color: var(--text-dim); font-size: 8.5px; }
-.news-trust, .news-symbol { padding: 3px 6px; border-radius: 6px; font-size: 8px; font-weight: 730; }
+.news-trust, .news-symbol, .news-summary-status { padding: 3px 6px; border-radius: 6px; font-size: 8px; font-weight: 730; }
 .news-trust { background: rgba(255,255,255,.04); color: var(--text-dim); }
 .news-trust.verified { background: var(--up-soft); color: var(--up); }
 .news-symbol { background: var(--accent-soft); color: var(--accent-bright); }
+.news-summary-status { background: rgba(255,255,255,.04); color: var(--text-dim); }
+.news-summary-completed { background: rgba(139,111,255,.14); color: #c5b8ff; }
+.news-summary-running { background: var(--accent-soft); color: var(--accent-bright); }
+.news-summary-failed { background: var(--warn-soft); color: var(--warn); }
 .news-item-card h2 { margin: 13px 0 8px; font-size: 15px; line-height: 1.4; }
 .news-item-card h2 a { color: var(--text); }
 .news-item-card h2 a:hover { color: var(--accent-bright); }
-.news-item-card > p { min-height: 48px; margin: 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.55; }
+.news-item-card > .news-summary-copy { min-height: 48px; margin: 0; color: var(--text-soft); font-size: 10.5px; line-height: 1.65; }
+.news-significance, .news-price-boundary { margin: 10px 0 0; padding: 9px 10px; border-radius: 9px; color: var(--text-dim); font-size: 9.5px; line-height: 1.55; }
+.news-significance { background: rgba(109,140,255,.06); }
+.news-price-boundary { background: rgba(255,255,255,.022); }
+.news-significance span, .news-price-boundary span { margin-right: 7px; color: var(--accent-bright); font-size: 8px; font-weight: 740; }
+.news-price-boundary span { color: var(--warn); }
+.news-original { margin-top: 10px; color: var(--text-dim); font-size: 9px; }
+.news-original summary { cursor: pointer; color: var(--text-dim); }
+.news-original p { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--line); line-height: 1.55; }
 .news-item-footer { display: flex; align-items: center; gap: 9px; margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--line); }
 .news-item-footer > strong { flex: 0 0 auto; color: var(--text-soft); font-size: 9px; }
 .news-item-footer > a { flex: 0 0 auto; margin-left: auto; color: var(--accent-bright); font-size: 9px; }
