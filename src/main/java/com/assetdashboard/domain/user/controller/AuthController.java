@@ -1,21 +1,31 @@
 package com.assetdashboard.domain.user.controller;
 
+import com.assetdashboard.domain.user.dto.EmailAvailabilityResponse;
+import com.assetdashboard.domain.user.dto.ChangePasswordRequest;
+import com.assetdashboard.domain.user.dto.DeleteAccountRequest;
 import com.assetdashboard.domain.user.dto.LoginRequest;
 import com.assetdashboard.domain.user.dto.LoginResponse;
 import com.assetdashboard.domain.user.dto.SignupRequest;
 import com.assetdashboard.domain.user.dto.UserResponse;
 import com.assetdashboard.domain.user.service.UserService;
+import com.assetdashboard.domain.user.service.UserAccountService;
 import com.assetdashboard.global.security.CurrentUserId;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -28,9 +38,27 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Validated
 public class AuthController {
 
   private final UserService userService;
+  private final UserAccountService userAccountService;
+
+  /**
+   * 회원가입 이메일 중복 여부를 확인한다.
+   *
+   * @param email 확인할 이메일
+   * @return 사용 가능 여부
+   */
+  @Operation(summary = "이메일 중복확인", description = "회원가입 편의를 위한 사전 확인이며 가입 요청에서 다시 검증한다.")
+  @GetMapping("/email-availability")
+  public ResponseEntity<EmailAvailabilityResponse> checkEmailAvailability(
+      @RequestParam
+          @NotBlank(message = "이메일은 필수입니다.")
+          @Email(message = "이메일 형식이 올바르지 않습니다.")
+          String email) {
+    return ResponseEntity.ok(userService.checkEmailAvailability(email));
+  }
 
   /**
    * 회원가입.
@@ -66,5 +94,33 @@ public class AuthController {
   @GetMapping("/me")
   public ResponseEntity<UserResponse> me(@CurrentUserId Long userId) {
     return ResponseEntity.ok(userService.getMe(userId));
+  }
+
+  /** 현재 비밀번호를 확인하고 새 비밀번호를 저장한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param request 현재 비밀번호와 새 비밀번호
+   * @return 본문이 없는 성공 응답
+   */
+  @Operation(summary = "비밀번호 변경", description = "현재 비밀번호를 확인한 뒤 새 비밀번호를 저장한다.")
+  @PatchMapping("/password")
+  public ResponseEntity<Void> changePassword(
+      @CurrentUserId Long userId, @Valid @RequestBody ChangePasswordRequest request) {
+    userAccountService.changePassword(userId, request);
+    return ResponseEntity.noContent().build();
+  }
+
+  /** 계정과 연결된 자산·거래·Snapshot을 영구 삭제한다.
+   *
+   * @param userId 인증된 사용자 id
+   * @param request 현재 비밀번호와 DELETE 확인 문구
+   * @return 본문이 없는 성공 응답
+   */
+  @Operation(summary = "회원 탈퇴", description = "현재 계정과 연결된 모든 데이터를 영구 삭제한다.")
+  @DeleteMapping("/account")
+  public ResponseEntity<Void> deleteAccount(
+      @CurrentUserId Long userId, @Valid @RequestBody DeleteAccountRequest request) {
+    userAccountService.deleteAccount(userId, request);
+    return ResponseEntity.noContent().build();
   }
 }

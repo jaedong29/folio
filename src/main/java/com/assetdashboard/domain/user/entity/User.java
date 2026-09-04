@@ -54,4 +54,12 @@ public class User extends BaseCreatedEntity {
   public static User create(String email, String encodedPassword, String nickname) {
     return new User(email, encodedPassword, nickname);
   }
+
+  /** 비밀번호 해시를 새 값으로 교체한다.
+   *
+   * @param encodedPassword 이미 해시된 새 비밀번호
+   */
+  public void changePassword(String encodedPassword) {
+    this.password = encodedPassword;
+  }
 }

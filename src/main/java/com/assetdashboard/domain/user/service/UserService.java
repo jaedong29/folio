@@ -1,5 +1,6 @@
 package com.assetdashboard.domain.user.service;
 
+import com.assetdashboard.domain.user.dto.EmailAvailabilityResponse;
 import com.assetdashboard.domain.user.dto.LoginRequest;
 import com.assetdashboard.domain.user.dto.LoginResponse;
 import com.assetdashboard.domain.user.dto.SignupRequest;
@@ -11,6 +12,7 @@ import com.assetdashboard.global.exception.ErrorCode;
 import com.assetdashboard.global.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +29,22 @@ public class UserService {
   private final JwtTokenProvider tokenProvider;
 
   /**
+   * 회원가입 전에 이메일 사용 가능 여부를 확인한다.
+   *
+   * <p>이 응답은 입력 편의를 위한 사전 확인이며, 확인 직후 다른 요청이 같은 이메일로 가입할 수 있으므로
+   * {@link #signup(SignupRequest)}에서도 유니크 여부를 다시 검사한다.
+   *
+   * @param rawEmail 사용자가 입력한 이메일
+   * @return 정규화된 이메일과 사용 가능 여부
+   */
+  public EmailAvailabilityResponse checkEmailAvailability(String rawEmail) {
+    String email = rawEmail.trim().toLowerCase();
+    boolean available = !userRepository.existsByEmail(email);
+    return new EmailAvailabilityResponse(
+        email, available, available ? "사용 가능한 이메일입니다." : "이미 사용 중인 이메일입니다.");
+  }
+
+  /**
    * 새 사용자를 등록한다.
    *
    * @param request 회원가입 요청
@@ -41,7 +59,12 @@ public class UserService {
     }
     User user =
         User.create(email, passwordEncoder.encode(request.password()), request.nickname().trim());
-    return UserResponse.from(userRepository.save(user));
+    try {
+      return UserResponse.from(userRepository.saveAndFlush(user));
+    } catch (DataIntegrityViolationException exception) {
+      // 중복확인 직후 다른 요청이 먼저 가입한 경합도 이메일 중복으로 일관되게 응답한다.
+      throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
+    }
   }
 
   /**
