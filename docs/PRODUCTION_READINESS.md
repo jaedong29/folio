@@ -17,6 +17,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V8`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
 | 백업 | AWS 스테이징용 백업·복구·검증 스크립트 존재(수동 실행) | `deploy/aws/backup.sh`, `restore.sh`, `verify-backup.sh` |
 | LLM 안전장치 | 숫자 조작·가격 인과·Prompt Injection·문장수·비정상 토큰을 규칙 기반으로 차단, 골든셋으로 회귀 검증 | `evidence/news/NewsAnswerGuardrail.java`, `news/NewsSummaryGuardrail.java` |
+| 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
 
 ## 남은 갭
 
@@ -24,7 +25,8 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 ### 보안
 
-- **로그인·재발급에 rate limit이 없다.** Brute force나 credential stuffing을 막을 방법이 없다. **개인 MVP라 실제 공격 트래픽을 겪어본 적이 없어 우선순위가 밀렸다.**
+- **로그인 잠금·IP 제한이 메모리 상태다.** `LoginAttemptGuard`/`AuthRateLimitFilter` 둘 다 `ConcurrentHashMap`에 상태를 둔다. 단일 인스턴스에서는 문제없지만 인스턴스를 늘리면 인스턴스마다 카운터가 따로 놀아 우회가 쉬워진다 — Redis 같은 공유 저장소로 옮겨야 한다. **지금은 단일 인스턴스 MVP라 별도 인프라 없이 바로 동작하는 쪽을 택했다.**
+- **회원가입·이메일 중복확인에는 이메일 단위 잠금이 없다.** IP 단위 전역 제한(`AuthRateLimitFilter`)은 걸리지만, 특정 이메일을 겨냥한 시도를 막는 장치는 로그인에만 있다.
 - **Secrets가 환경변수뿐이다.** AWS Secrets Manager, Vault 같은 별도 비밀 관리 시스템 연동이 없다. **단일 인스턴스 개인 배포 규모에서는 환경변수로 충분해서다.**
 - **감사 로그(audit log)가 없다.** 계정 삭제, 비밀번호 변경 같은 민감 액션이 애플리케이션 로그에만 남고 별도 감사 트레일로 분리돼 있지 않다.
 - **CORS 정책이 명시돼 있지 않다.** 지금은 정적 리소스와 API가 같은 origin에서 서빙되어 필요 없지만, 프런트엔드를 분리 배포하면 그때 반드시 설정해야 한다.
@@ -51,9 +53,8 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 ## 지금부터 순서대로 하나만 고른다면
 
 1. **CI를 GitHub에 연결한다.** 이미 만들어진 워크플로를 실제로 한 번 돌려보는 것 — 가장 리스크가 낮고 바로 확인 가능하다.
-2. **로그인·재발급 rate limit.** Refresh Token 인프라가 이미 있으니, 실패 횟수 기반 잠금이나 IP 단위 제한을 얹는 작업의 범위가 작다.
-3. **골든셋 13개 확장.** 새 기능이 아니라 기존 Live Evaluation Batch Runner의 커버리지를 넓히는 작업이라 설계 변경이 필요 없다.
-4. **다중 인스턴스 대비 분산 락.** 실제로 인스턴스를 늘릴 계획이 생기기 전까지는 우선순위가 낮다 — 지금 단일 인스턴스 MVP에는 과설계다.
+2. **골든셋 13개 확장.** 새 기능이 아니라 기존 Live Evaluation Batch Runner의 커버리지를 넓히는 작업이라 설계 변경이 필요 없다.
+3. **다중 인스턴스 대비 분산 락.** 실제로 인스턴스를 늘릴 계획이 생기기 전까지는 우선순위가 낮다 — 지금 단일 인스턴스 MVP에는 과설계다. 늘리기로 하면 `LoginAttemptGuard`/`AuthRateLimitFilter`의 메모리 상태도 이때 같이 옮겨야 한다.
 
 MyData 연동, 지갑 자동 연동, 주문 실행처럼 이 프로젝트의 문제 정의 자체를 벗어나는 확장은 이
 목록에 넣지 않았습니다. 각 기능의 세부 한계는 [README](../README.md)의 "의도적으로 남긴

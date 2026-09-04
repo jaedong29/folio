@@ -37,6 +37,12 @@ public enum ErrorCode {
   /** Refresh Token이 없거나 만료·폐기되었거나 이미 회전(rotate)되어 재사용된 경우. */
   INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "다시 로그인해주세요."),
 
+  /** 같은 이메일로 로그인 실패가 반복돼 일시적으로 잠긴 경우. */
+  TOO_MANY_LOGIN_ATTEMPTS(HttpStatus.TOO_MANY_REQUESTS, "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요."),
+
+  /** 같은 IP에서 인증 API 요청이 짧은 시간에 너무 많이 온 경우. */
+  TOO_MANY_AUTH_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+
   /**
    * 타인 소유 자산 접근 시도. 클라이언트에는 노출하지 않고 서버 로그 기록 전용으로만 사용한다 (PRD 4-0 규칙 3).
    */

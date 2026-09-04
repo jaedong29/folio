@@ -1,5 +1,6 @@
 package com.assetdashboard.global.config;
 
+import com.assetdashboard.global.security.AuthRateLimitFilter;
 import com.assetdashboard.global.security.JwtAuthenticationFilter;
 import com.assetdashboard.global.security.RestAuthenticationEntryPoint;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class SecurityConfig {
   };
 
   private final JwtAuthenticationFilter jwtAuthenticationFilter;
+  private final AuthRateLimitFilter authRateLimitFilter;
   private final RestAuthenticationEntryPoint authenticationEntryPoint;
 
   /**
@@ -67,7 +69,7 @@ public class SecurityConfig {
   @Bean
   public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
     http.csrf(csrf -> csrf.disable())
-        // 토큰 기반이므로 세션을 만들지 않는다. 로그아웃도 클라이언트의 토큰 삭제로 처리한다(PRD 4-1).
+        // 토큰 기반이므로 세션을 만들지 않는다. 로그아웃은 Refresh Token을 서버가 실제로 폐기한다.
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .formLogin(form -> form.disable())
         .httpBasic(basic -> basic.disable())
@@ -84,7 +86,9 @@ public class SecurityConfig {
                     .anyRequest()
                     .authenticated())
         .exceptionHandling(e -> e.authenticationEntryPoint(authenticationEntryPoint))
-        .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+        // IP 단위 요청 제한은 JWT 파싱보다도 먼저 걸러 불필요한 작업을 피한다.
+        .addFilterBefore(authRateLimitFilter, JwtAuthenticationFilter.class);
 
     return http.build();
   }

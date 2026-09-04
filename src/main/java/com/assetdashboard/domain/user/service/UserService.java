@@ -11,6 +11,7 @@ import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
 import com.assetdashboard.global.security.IssuedRefreshToken;
 import com.assetdashboard.global.security.JwtTokenProvider;
+import com.assetdashboard.global.security.LoginAttemptGuard;
 import com.assetdashboard.global.security.RefreshTokenRotation;
 import com.assetdashboard.global.security.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class UserService {
   private final PasswordEncoder passwordEncoder;
   private final JwtTokenProvider tokenProvider;
   private final RefreshTokenService refreshTokenService;
+  private final LoginAttemptGuard loginAttemptGuard;
 
   /**
    * 회원가입 전에 이메일 사용 가능 여부를 확인한다.
@@ -76,21 +78,23 @@ public class UserService {
    *
    * @param request 로그인 요청
    * @return 액세스 토큰을 담은 응답
-   * @throws BusinessException 이메일이 없거나 비밀번호가 틀린 경우 {@code INVALID_CREDENTIALS}
+   * @throws BusinessException 이메일이 없거나 비밀번호가 틀린 경우 {@code INVALID_CREDENTIALS}, 같은
+   *     이메일로 실패가 반복돼 잠긴 경우 {@code TOO_MANY_LOGIN_ATTEMPTS}
    */
   @Transactional
   public LoginResponse login(LoginRequest request) {
     String email = request.email().trim().toLowerCase();
-    // 미가입 이메일과 비밀번호 불일치를 같은 에러로 응답해 계정 존재 여부가 새어나가지 않게 한다.
-    User user =
-        userRepository
-            .findByEmail(email)
-            .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_CREDENTIALS));
+    loginAttemptGuard.ensureNotLocked(email);
 
-    if (!passwordEncoder.matches(request.password(), user.getPassword())) {
-      log.warn("[Login] 비밀번호 불일치 userId={}", user.getId());
+    // 미가입 이메일과 비밀번호 불일치를 같은 에러로 응답해 계정 존재 여부가 새어나가지 않게 한다.
+    // 잠금 카운터도 이 둘을 구분하지 않고 같은 이메일 키로 함께 센다.
+    User user = userRepository.findByEmail(email).orElse(null);
+    if (user == null || !passwordEncoder.matches(request.password(), user.getPassword())) {
+      log.warn("[Login] 인증 실패 email={}", email);
+      loginAttemptGuard.recordFailure(email);
       throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
     }
+    loginAttemptGuard.recordSuccess(email);
 
     IssuedRefreshToken refreshToken = refreshTokenService.issue(user.getId());
     return LoginResponse.of(

@@ -17,6 +17,7 @@ import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
 import com.assetdashboard.global.security.IssuedRefreshToken;
 import com.assetdashboard.global.security.JwtTokenProvider;
+import com.assetdashboard.global.security.LoginAttemptGuard;
 import com.assetdashboard.global.security.RefreshTokenRotation;
 import com.assetdashboard.global.security.RefreshTokenService;
 import java.time.Instant;
@@ -36,13 +37,15 @@ class UserServiceTest {
   @Mock private PasswordEncoder passwordEncoder;
   @Mock private JwtTokenProvider tokenProvider;
   @Mock private RefreshTokenService refreshTokenService;
+  @Mock private LoginAttemptGuard loginAttemptGuard;
 
   private UserService userService;
 
   @BeforeEach
   void setUp() {
     userService =
-        new UserService(userRepository, passwordEncoder, tokenProvider, refreshTokenService);
+        new UserService(
+            userRepository, passwordEncoder, tokenProvider, refreshTokenService, loginAttemptGuard);
   }
 
   @Test
@@ -97,6 +100,44 @@ class UserServiceTest {
     assertThat(response.accessToken()).isEqualTo("access-token");
     assertThat(response.refreshToken()).isEqualTo("refresh-token");
     assertThat(response.expiresIn()).isEqualTo(1800L);
+    verify(loginAttemptGuard).recordSuccess("user@example.com");
+  }
+
+  @Test
+  void loginRejectsWhenAlreadyLockedWithoutTouchingPasswordEncoder() {
+    org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.TOO_MANY_LOGIN_ATTEMPTS))
+        .when(loginAttemptGuard)
+        .ensureNotLocked("user@example.com");
+
+    assertThatThrownBy(() -> userService.login(new LoginRequest("user@example.com", "1234abcd")))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TOO_MANY_LOGIN_ATTEMPTS));
+
+    verify(passwordEncoder, org.mockito.Mockito.never()).matches(any(), any());
+  }
+
+  @Test
+  void loginRecordsFailureOnWrongPassword() {
+    User user = userWithId(7L, "user@example.com", "encoded", "user");
+    when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+    when(passwordEncoder.matches("wrong", "encoded")).thenReturn(false);
+
+    assertThatThrownBy(() -> userService.login(new LoginRequest("user@example.com", "wrong")))
+        .isInstanceOf(BusinessException.class);
+
+    verify(loginAttemptGuard).recordFailure("user@example.com");
+  }
+
+  @Test
+  void loginRecordsFailureOnUnknownEmailJustLikeWrongPassword() {
+    when(userRepository.findByEmail("nobody@example.com")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () -> userService.login(new LoginRequest("nobody@example.com", "1234abcd")))
+        .isInstanceOf(BusinessException.class);
+
+    verify(loginAttemptGuard).recordFailure("nobody@example.com");
   }
 
   @Test

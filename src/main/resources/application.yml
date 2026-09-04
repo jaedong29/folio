@@ -37,6 +37,12 @@ app:
     # Access Token은 탈취돼도 피해가 작도록 짧게 유지한다. 세션 연장은 revoke·rotate 가능한 Refresh Token이 담당한다.
     expiration-minutes: ${APP_JWT_EXPIRATION_MINUTES:30}
     refresh-expiration-days: ${APP_JWT_REFRESH_EXPIRATION_DAYS:14}
+  auth:
+    # brute force 방어. 단일 인스턴스 메모리 상태이며 인스턴스를 늘리면 공유 저장소로 옮겨야 한다.
+    max-login-attempts: ${APP_AUTH_MAX_LOGIN_ATTEMPTS:5}
+    login-lockout-minutes: ${APP_AUTH_LOGIN_LOCKOUT_MINUTES:15}
+    max-requests-per-ip-per-window: ${APP_AUTH_MAX_REQUESTS_PER_IP:20}
+    ip-window-seconds: ${APP_AUTH_IP_WINDOW_SECONDS:60}
   price:
     cache-ttl-minutes: 15
     timeout-millis: 2000
