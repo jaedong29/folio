@@ -7,6 +7,8 @@ import com.assetdashboard.domain.user.repository.UserRepository;
 import com.assetdashboard.evidence.calculation.EvidenceConclusion;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolAdapter;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolResult;
+import com.assetdashboard.evidence.news.NewsEvidenceToolAdapter;
+import com.assetdashboard.evidence.news.NewsEvidenceToolResult;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -23,6 +25,7 @@ class FinancialAgentEvaluationFixtureServiceTest {
   @Autowired private UserRepository userRepository;
   @Autowired private FinancialAgentEvaluationFixtureService fixtureService;
   @Autowired private AssetEvidenceToolAdapter toolAdapter;
+  @Autowired private NewsEvidenceToolAdapter newsToolAdapter;
 
   @ParameterizedTest(name = "{0} fixture는 {1} 결론과 결정적 fact를 만든다")
   @MethodSource("fixtureCases")
@@ -38,6 +41,20 @@ class FinancialAgentEvaluationFixtureServiceTest {
     assertThat(fixture.caseId()).isEqualTo(caseId);
     assertThat(result.grounding().conclusion()).isEqualTo(conclusion);
     assertThat(result.grounding().evidenceFacts()).containsAll(requiredFacts);
+  }
+
+  @org.junit.jupiter.api.Test
+  void createsOfficialNewsFixtureWithoutAnotherModelCall() {
+    User user =
+        userRepository.save(User.create("nim-eval-news@example.com", "encoded", "eval"));
+
+    EvaluationFixtureResponse fixture = fixtureService.create(user.getId(), "symbol-official-news");
+    NewsEvidenceToolResult result = newsToolAdapter.execute(user.getId(), fixture.assetId());
+
+    assertThat(result.grounding().conclusion()).isEqualTo(EvidenceConclusion.PARTIAL);
+    assertThat(result.grounding().evidenceFacts())
+        .contains("NEWS_AVAILABLE", "VERIFIED_OFFICIAL", "untrustedContent=true");
+    assertThat(result.payload().items()).hasSize(1);
   }
 
   private static Stream<Arguments> fixtureCases() {

@@ -1,0 +1,45 @@
+CREATE TABLE live_evaluation_batches (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    batch_id VARCHAR(36) NOT NULL,
+    user_id BIGINT NOT NULL,
+    case_ids VARCHAR(500) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    started_at TIMESTAMP(6) NULL,
+    completed_at TIMESTAMP(6) NULL,
+    completed_count INT NOT NULL DEFAULT 0,
+    passed_count INT NOT NULL DEFAULT 0,
+    hard_failure_count INT NOT NULL DEFAULT 0,
+    total_latency_ms BIGINT NOT NULL DEFAULT 0,
+    total_input_tokens BIGINT NOT NULL DEFAULT 0,
+    total_output_tokens BIGINT NOT NULL DEFAULT 0,
+    observed_model_calls INT NOT NULL DEFAULT 0,
+    error_code VARCHAR(80) NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(6) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_live_eval_batch UNIQUE (batch_id),
+    CONSTRAINT fk_live_eval_batch_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_live_eval_user_created (user_id, created_at),
+    INDEX idx_live_eval_status_created (status, created_at)
+);
+
+CREATE TABLE live_evaluation_batch_cases (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    batch_job_id BIGINT NOT NULL,
+    case_id VARCHAR(80) NOT NULL,
+    trace_id VARCHAR(36) NULL,
+    passed BOOLEAN NOT NULL,
+    hard_failure BOOLEAN NOT NULL,
+    conclusion VARCHAR(20) NULL,
+    latency_ms BIGINT NOT NULL DEFAULT 0,
+    input_tokens BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    model_call_count INT NOT NULL DEFAULT 0,
+    failure_codes VARCHAR(500) NULL,
+    error_code VARCHAR(80) NULL,
+    created_at TIMESTAMP(6) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_live_eval_batch_case UNIQUE (batch_job_id, case_id),
+    CONSTRAINT fk_live_eval_case_batch FOREIGN KEY (batch_job_id)
+        REFERENCES live_evaluation_batches(id) ON DELETE CASCADE
+);

@@ -66,6 +66,9 @@ public enum ErrorCode {
   /** 존재하지 않거나 타인 소유인 Agent Trace. */
   AGENT_TRACE_NOT_FOUND(HttpStatus.NOT_FOUND, "Agent 실행 기록을 찾을 수 없습니다."),
 
+  /** 존재하지 않거나 타인 소유인 실제 NIM 평가 배치. */
+  EVALUATION_BATCH_NOT_FOUND(HttpStatus.NOT_FOUND, "평가 배치를 찾을 수 없습니다."),
+
   /** 화이트리스트에 등록되지 않은 뉴스 수집 출처. */
   NEWS_SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "등록된 뉴스 출처를 찾을 수 없습니다."),
 

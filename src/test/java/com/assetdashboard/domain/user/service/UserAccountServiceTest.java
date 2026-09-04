@@ -13,6 +13,9 @@ import com.assetdashboard.domain.user.dto.DeleteAccountRequest;
 import com.assetdashboard.domain.user.entity.User;
 import com.assetdashboard.domain.user.repository.UserRepository;
 import com.assetdashboard.evidence.document.EvidenceDocumentRepository;
+import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchCaseRepository;
+import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchJob;
+import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchJobRepository;
 import com.assetdashboard.evidence.trace.AgentEvaluationRecordRepository;
 import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
@@ -39,6 +42,8 @@ class UserAccountServiceTest {
   @Mock private AgentTraceRunRepository agentTraceRunRepository;
   @Mock private AgentTraceSpanRepository agentTraceSpanRepository;
   @Mock private AgentEvaluationRecordRepository agentEvaluationRecordRepository;
+  @Mock private LiveEvaluationBatchJobRepository liveEvaluationBatchJobRepository;
+  @Mock private LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
   @Mock private PasswordEncoder passwordEncoder;
   @Mock private Asset asset;
 
@@ -57,6 +62,8 @@ class UserAccountServiceTest {
             agentTraceRunRepository,
             agentTraceSpanRepository,
             agentEvaluationRecordRepository,
+            liveEvaluationBatchJobRepository,
+            liveEvaluationBatchCaseRepository,
             passwordEncoder);
     user = User.create("user@example.com", "encoded-old", "user");
     when(userRepository.findById(7L)).thenReturn(java.util.Optional.of(user));
@@ -83,12 +90,17 @@ class UserAccountServiceTest {
     when(asset.getId()).thenReturn(11L);
     when(assetRepository.findAllByUserId(7L)).thenReturn(List.of(asset));
     when(agentTraceRunRepository.findIdsByUserId(7L)).thenReturn(List.of(31L));
+    LiveEvaluationBatchJob batch = LiveEvaluationBatchJob.pending(7L, List.of("missing-fx"));
+    org.springframework.test.util.ReflectionTestUtils.setField(batch, "id", 41L);
+    when(liveEvaluationBatchJobRepository.findAllByUserId(7L)).thenReturn(List.of(batch));
 
     userAccountService.deleteAccount(7L, new DeleteAccountRequest("old-password", "DELETE"));
 
     InOrder deletionOrder =
         inOrder(
             agentEvaluationRecordRepository,
+            liveEvaluationBatchCaseRepository,
+            liveEvaluationBatchJobRepository,
             agentTraceSpanRepository,
             agentTraceRunRepository,
             evidenceDocumentRepository,
@@ -96,6 +108,8 @@ class UserAccountServiceTest {
             assetRepository,
             portfolioSnapshotRepository,
             userRepository);
+    deletionOrder.verify(liveEvaluationBatchCaseRepository).deleteAllByBatchJobIdIn(List.of(41L));
+    deletionOrder.verify(liveEvaluationBatchJobRepository).deleteAllByUserId(7L);
     deletionOrder.verify(agentEvaluationRecordRepository).deleteAllByRunIdIn(List.of(31L));
     deletionOrder.verify(agentTraceSpanRepository).deleteAllByRunIdIn(List.of(31L));
     deletionOrder.verify(agentTraceRunRepository).deleteAllByUserId(7L);

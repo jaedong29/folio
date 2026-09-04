@@ -5,11 +5,14 @@ import com.assetdashboard.evidence.trace.AgentTraceResponse;
 import com.assetdashboard.global.security.CurrentUserId;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -23,10 +26,13 @@ public class FinancialAgentEvaluationController {
 
   private final FinancialAgentEvaluationFixtureService fixtureService;
   private final FinancialEvidenceAgentService agentService;
+  private final LiveEvaluationBatchQueueService batchQueueService;
+  private final LiveEvaluationBatchLifecycleService batchLifecycleService;
 
   @Operation(
       summary = "골든 케이스 합성 자산 생성",
-      description = "지원: fresh-valuation, missing-price, missing-fx, missing-cost-basis")
+      description =
+          "지원: fresh-valuation, missing-price, missing-fx, missing-cost-basis, symbol-official-news")
   @PostMapping("/fixtures/{caseId}")
   public ResponseEntity<EvaluationFixtureResponse> createFixture(
       @CurrentUserId Long userId, @PathVariable String caseId) {
@@ -42,5 +48,21 @@ public class FinancialAgentEvaluationController {
       @PathVariable String caseId,
       @PathVariable Long assetId) {
     return ResponseEntity.ok(agentService.evaluate(userId, assetId, caseId));
+  }
+
+  @Operation(
+      summary = "최대 5건 실제 NIM 평가 배치 시작",
+      description = "confirmLiveCalls=true가 필요하며 비동기로 실행한다. 빈 caseIds는 지원되는 5건 전체를 뜻한다.")
+  @PostMapping("/live-runs")
+  public ResponseEntity<LiveEvaluationBatchResponse> startLiveRun(
+      @CurrentUserId Long userId, @Valid @RequestBody LiveEvaluationBatchRequest request) {
+    return ResponseEntity.accepted().body(batchQueueService.enqueue(userId, request));
+  }
+
+  @Operation(summary = "실제 NIM 평가 배치 상태·집계 조회")
+  @GetMapping("/live-runs/{batchId}")
+  public ResponseEntity<LiveEvaluationBatchResponse> getLiveRun(
+      @CurrentUserId Long userId, @PathVariable String batchId) {
+    return ResponseEntity.ok(batchLifecycleService.get(userId, batchId));
   }
 }

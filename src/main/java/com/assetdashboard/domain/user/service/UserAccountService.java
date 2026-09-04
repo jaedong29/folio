@@ -9,6 +9,9 @@ import com.assetdashboard.domain.user.dto.DeleteAccountRequest;
 import com.assetdashboard.domain.user.entity.User;
 import com.assetdashboard.domain.user.repository.UserRepository;
 import com.assetdashboard.evidence.document.EvidenceDocumentRepository;
+import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchCaseRepository;
+import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchJob;
+import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchJobRepository;
 import com.assetdashboard.evidence.trace.AgentEvaluationRecordRepository;
 import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
@@ -33,6 +36,8 @@ public class UserAccountService {
   private final AgentTraceRunRepository agentTraceRunRepository;
   private final AgentTraceSpanRepository agentTraceSpanRepository;
   private final AgentEvaluationRecordRepository agentEvaluationRecordRepository;
+  private final LiveEvaluationBatchJobRepository liveEvaluationBatchJobRepository;
+  private final LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
   private final PasswordEncoder passwordEncoder;
 
   /** 현재 비밀번호를 확인하고 새 비밀번호를 저장한다.
@@ -66,6 +71,14 @@ public class UserAccountService {
     List<Long> assetIds =
         assetRepository.findAllByUserId(userId).stream().map(Asset::getId).toList();
     List<Long> traceRunIds = agentTraceRunRepository.findIdsByUserId(userId);
+    List<Long> evaluationBatchIds =
+        liveEvaluationBatchJobRepository.findAllByUserId(userId).stream()
+            .map(LiveEvaluationBatchJob::getId)
+            .toList();
+    if (!evaluationBatchIds.isEmpty()) {
+      liveEvaluationBatchCaseRepository.deleteAllByBatchJobIdIn(evaluationBatchIds);
+      liveEvaluationBatchJobRepository.deleteAllByUserId(userId);
+    }
     if (!traceRunIds.isEmpty()) {
       agentEvaluationRecordRepository.deleteAllByRunIdIn(traceRunIds);
       agentTraceSpanRepository.deleteAllByRunIdIn(traceRunIds);
