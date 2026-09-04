@@ -295,7 +295,11 @@ python3 scripts/update-krx-securities.py
 ./gradlew test
 ```
 
-현재 11개 테스트 클래스, 35개 테스트가 opening position, 평균단가 null, 보유 수량 정정, 환율 계약, 정산·replay, Daily PnL, 사용자 가입 등을 검증합니다.
+현재 44개 테스트 클래스, 126개 테스트가 opening position, 평균단가 null, 보유 수량 정정, 환율 계약, 정산·replay, Daily PnL, 사용자 가입, Agent Trace·평가 하네스, 뉴스 수집·요약 Guardrail 등을 검증합니다. 실제 NIM·외부 시세 호출은 모두 mock으로 고정되어 있어 `NVIDIA_API_KEY` 없이도 전부 통과합니다.
+
+### CI
+
+`.github/workflows/ci.yml`이 push·PR마다 `./gradlew clean test`와 API 키 패턴 검사를 자동 실행합니다. 실제 시크릿을 CI에 주입하지 않으며, 이 저장소를 GitHub에 올리는 즉시 별도 설정 없이 동작합니다.
 
 ### 실행 가능한 HTTP 검증
 

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# 동시에 여러 push가 들어와도 브랜치당 최신 커밋만 검증한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # NVIDIA_API_KEY 등 실제 시크릿은 주입하지 않는다. 모든 외부 NIM/시세 호출은
+      # MockRestServiceServer로 응답을 고정하므로 테스트는 실제 키 없이 통과해야 한다.
+      - name: Build and test (H2, 실제 외부 호출 없음)
+        run: ./gradlew clean test --no-daemon
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests/test
+          retention-days: 7
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 이 프로젝트에서 반복적으로 수동 확인해온 패턴(API 키·AWS Access Key)을
+      # 커밋마다 자동으로 검사한다. 매치가 있으면 빌드를 막는다.
+      - name: Scan tracked files for leaked API key patterns
+        run: |
+          set -e
+          MATCHES=$(grep -rnIE \
+            --exclude-dir=.git --exclude-dir=build --exclude-dir=.gradle \
+            "sk-[a-zA-Z0-9]{20,}|nvapi-[a-zA-Z0-9_-]{20,}|AKIA[0-9A-Z]{16}" \
+            . || true)
+          if [ -n "$MATCHES" ]; then
+            echo "잠재적인 API 키 패턴이 커밋된 파일에서 발견됐습니다:" >&2
+            echo "$MATCHES" >&2
+            exit 1
+          fi
+          echo "No leaked key patterns found."
