@@ -12,7 +12,14 @@ public class NewsSummaryGuardrail {
 
   private static final int MAX_SUMMARY_LENGTH = 500;
   private static final int MAX_SIGNIFICANCE_LENGTH = 300;
+  private static final int MAX_SUMMARY_SENTENCES = 2;
+  private static final int MAX_SIGNIFICANCE_SENTENCES = 1;
   private static final Pattern NUMBER = Pattern.compile("\\d+(?:[.,]\\d+)*(?:%|개|건)?");
+  // 문장 끝 구두점 뒤가 공백/끝이어도 숫자 바로 뒤(예: "6.3.0")는 문장 경계로 세지 않는다.
+  private static final Pattern SENTENCE_BOUNDARY = Pattern.compile("(?<!\\d)[.!?](?=\\s|$)");
+  // 모델이 원문 코드 식별자를 자연어 중간에 그대로 흘린 흔적("_sync 성능" 등).
+  private static final Pattern MALFORMED_TOKEN =
+      Pattern.compile("(?:^|\\s)_[A-Za-z]+|[A-Za-z]+_(?=\\s|$)");
   private static final String[] FORBIDDEN_TERMS = {
     "가격", "시세", "매수", "매도", "투자 추천", "호재", "악재",
     "시스템 프롬프트", "다른 사용자", "이전 지시"
@@ -25,6 +32,15 @@ public class NewsSummaryGuardrail {
         || draft.summaryKo().length() > MAX_SUMMARY_LENGTH
         || draft.significanceKo().length() > MAX_SIGNIFICANCE_LENGTH) {
       return Optional.of("SUMMARY_INVALID_LENGTH");
+    }
+
+    if (containsMalformedToken(draft.summaryKo()) || containsMalformedToken(draft.significanceKo())) {
+      return Optional.of("SUMMARY_MALFORMED_TOKEN");
+    }
+
+    if (countSentences(draft.summaryKo()) > MAX_SUMMARY_SENTENCES
+        || countSentences(draft.significanceKo()) > MAX_SIGNIFICANCE_SENTENCES) {
+      return Optional.of("SUMMARY_TOO_MANY_SENTENCES");
     }
 
     String output = (draft.summaryKo() + " " + draft.significanceKo()).toLowerCase(Locale.ROOT);
@@ -47,5 +63,18 @@ public class NewsSummaryGuardrail {
 
   private boolean isBlank(String value) {
     return value == null || value.isBlank();
+  }
+
+  private boolean containsMalformedToken(String value) {
+    return MALFORMED_TOKEN.matcher(value).find();
+  }
+
+  private int countSentences(String value) {
+    Matcher matcher = SENTENCE_BOUNDARY.matcher(value.trim());
+    int count = 0;
+    while (matcher.find()) {
+      count++;
+    }
+    return count == 0 ? 1 : count;
   }
 }

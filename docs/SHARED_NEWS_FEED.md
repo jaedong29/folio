@@ -24,6 +24,7 @@ POST /api/news/refresh
 - 외부 내용은 검증된 공식 출처여도 LLM 명령이 아닌 `untrustedContent`로 취급한다.
 - 요약은 `PENDING/RUNNING/COMPLETED/FAILED` 상태와 모델·프롬프트 버전·지연·토큰을 함께 저장한다.
 - 모델에는 `summaryKo` 350자, `significanceKo` 180자 이하를 요구하며 초과 응답은 마지막 완성 문장 경계에서 축약한 뒤 Guardrail을 적용한다.
+- Guardrail은 길이·문장수(`summaryKo` 2문장, `significanceKo` 1문장)를 넘기거나 `_sync`처럼 원문 코드 식별자가 그대로 새어나온 응답도 차단한다. 둘 다 실제 NIM 재검증에서 관찰된 뒤 추가한 검사다.
 - 요약에 가격 전망·투자 권유·원문에 없는 숫자가 있으면 저장하지 않고 원문 excerpt로 돌아간다.
 - 차단된 요약 원문은 저장하지 않지만 안전한 실패 코드와 모델·프롬프트 버전·지연·토큰은 API에 노출해 운영 원인을 확인할 수 있다.
 - 완료된 요약도 공식 원문 일부와 원문 링크를 함께 보여준다.
@@ -61,5 +62,5 @@ POST /api/news/refresh
 2. 일반 언론은 robots, 약관, 저작권을 확인하고 제목·짧은 요약·원문 링크 중심으로 제한한다.
 3. Source별 요청 제한, 재시도, 지수 백오프, 마지막 성공/실패 지표를 분리한다.
 4. 다중 인스턴스에서는 작업 claim을 DB 락 또는 메시지 큐로 단일화한다.
-5. 한국어 요약 골든셋을 추가해 사실 보존, 숫자 지지 여부, Prompt Injection, 가격 인과 표현을 평가한다.
+5. `src/main/resources/evaluation/news-summary-quality-golden-set.jsonl`은 정상·깨진 토큰·문장수 위반·근거 없는 숫자·가격 인과·Prompt Injection 6종류를 Guardrail 회귀로 고정한다(`NewsSummaryQualityGoldenSetTest`). 아직 규칙으로 잡지 못하는 부분은 "원문 사실"과 "모델의 해석"이 문장에서 명확히 분리되는지이며, 이는 규칙 매칭만으로는 판정하기 어려워 사람 검토가 필요하다.
 6. 수집 품질과 Agent 답변은 출처 정확도, 시점 정확도, 인용 누락, 근거 없는 인과로 평가한다.
