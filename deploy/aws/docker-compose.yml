@@ -23,6 +23,8 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+    # Spring의 30초 종료 대기보다 길게 두어 Docker가 먼저 SIGKILL하지 않게 한다.
+    stop_grace_period: 35s
     depends_on:
       mysql:
         condition: service_healthy
