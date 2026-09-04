@@ -24,7 +24,13 @@ T=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' \
 
 mk() { curl -s -X POST "$B/api/assets" -H "Authorization: Bearer $T" \
         -H 'Content-Type: application/json' -d "$1" | sed -n 's/.*"id":\([0-9]*\).*/\1/p'; }
-tx() { curl -s -o /dev/null -X POST "$B/api/assets/$1/transactions/$2" -H "Authorization: Bearer $T" \
+default_cash_id() { curl -s "$B/api/assets" -H "Authorization: Bearer $T" | python3 -c '
+import json, sys
+symbol = sys.argv[1]
+assets = json.load(sys.stdin)
+print(next(a["id"] for a in assets if a["type"] == "CASH" and a["symbol"] == symbol))
+' "$1"; }
+tx() { curl -fsS -o /dev/null -X POST "$B/api/assets/$1/transactions/$2" -H "Authorization: Bearer $T" \
         -H 'Content-Type: application/json' -d "$3"; }
 setprice() { curl -s -o /dev/null -X PATCH "$B/api/assets/$1/price" -H "Authorization: Bearer $T" \
         -H 'Content-Type: application/json' -d "{\"currentPrice\":$2}"; }
@@ -34,23 +40,27 @@ setfx() { curl -s -o /dev/null -X PATCH "$B/api/assets/$1/exchange-rate" -H "Aut
 echo "▸ 자산 등록"
 BTC=$(mk  '{"type":"CRYPTO","symbol":"BTC","name":"비트코인","currency":"USDT"}')
 ETH=$(mk  '{"type":"CRYPTO","symbol":"ETH","name":"이더리움","currency":"USDT"}')
-NVDA=$(mk '{"type":"STOCK","symbol":"NVDA","name":"엔비디아","currency":"USD"}')
+ZEC=$(mk  '{"type":"CRYPTO","symbol":"ZEC","name":"Zcash","currency":"USDT","quantity":14.7,"averagePrice":370.40,"averageExchangeRate":1380}')
+NVDA=$(mk '{"type":"STOCK","symbol":"NVDA","market":"OVERSEAS","name":"엔비디아","currency":"USD"}')
+USDT=$(default_cash_id USDT)
+USD=$(default_cash_id USD)
 KB=$(mk   '{"type":"BANK","symbol":"KRW","name":"KB국민은행","currency":"KRW"}')
-CASH=$(mk '{"type":"CASH","symbol":"KRW","name":"현금","currency":"KRW"}')
-echo "  BTC=$BTC ETH=$ETH NVDA=$NVDA KB=$KB CASH=$CASH"
+CASH=$(default_cash_id KRW)
+echo "  BTC=$BTC ETH=$ETH ZEC=$ZEC NVDA=$NVDA USDT=$USDT USD=$USD KB=$KB CASH=$CASH"
 
 echo "▸ 거래 입력"
-tx "$BTC"  buy      '{"quantity":0.5,"price":40000,"exchangeRate":1380,"memo":"첫 매수","tradedAt":"2026-07-20T10:00:00"}'
-tx "$BTC"  buy      '{"quantity":0.3,"price":45000,"exchangeRate":1390,"memo":"추가 매수","tradedAt":"2026-08-01T10:00:00"}'
-tx "$BTC"  sell     '{"quantity":0.2,"price":56000,"exchangeRate":1385,"memo":"일부 익절","tradedAt":"2026-08-04T10:00:00"}'
-tx "$ETH"  buy      '{"quantity":4,"price":2400,"exchangeRate":1385,"tradedAt":"2026-08-02T10:00:00"}'
-tx "$NVDA" buy      '{"quantity":20,"price":120,"exchangeRate":1380,"memo":"실적 발표 전","tradedAt":"2026-07-25T10:00:00"}'
+tx "$USDT" deposit  '{"quantity":60000,"exchangeRate":1375,"exchangeRateMode":"MANUAL","memo":"거래소 투자금","tradedAt":"2026-07-19T10:00:00"}'
+tx "$USD"  deposit  '{"quantity":5000,"exchangeRate":1378,"exchangeRateMode":"MANUAL","memo":"증권계좌 투자금","tradedAt":"2026-07-24T10:00:00"}'
+tx "$BTC"  buy      "{\"quantity\":0.5,\"price\":40000,\"exchangeRate\":1380,\"exchangeRateMode\":\"MANUAL\",\"settlementAssetId\":$USDT,\"memo\":\"첫 매수\",\"tradedAt\":\"2026-07-20T10:00:00\"}"
+tx "$BTC"  buy      "{\"quantity\":0.3,\"price\":45000,\"exchangeRate\":1390,\"exchangeRateMode\":\"MANUAL\",\"settlementAssetId\":$USDT,\"memo\":\"추가 매수\",\"tradedAt\":\"2026-08-01T10:00:00\"}"
+tx "$BTC"  sell     "{\"quantity\":0.2,\"price\":56000,\"exchangeRate\":1385,\"exchangeRateMode\":\"MANUAL\",\"settlementAssetId\":$USDT,\"memo\":\"일부 익절\",\"tradedAt\":\"2026-08-04T10:00:00\"}"
+tx "$ETH"  buy      "{\"quantity\":4,\"price\":2400,\"exchangeRate\":1385,\"exchangeRateMode\":\"MANUAL\",\"settlementAssetId\":$USDT,\"tradedAt\":\"2026-08-02T10:00:00\"}"
+tx "$NVDA" buy      "{\"quantity\":20,\"price\":120,\"exchangeRate\":1380,\"exchangeRateMode\":\"MANUAL\",\"settlementAssetId\":$USD,\"memo\":\"실적 발표 전\",\"tradedAt\":\"2026-07-25T10:00:00\"}"
 tx "$KB"   deposit  '{"quantity":8500000,"memo":"월급 입금","tradedAt":"2026-08-05T09:00:00"}'
-tx "$CASH" deposit  '{"quantity":1200000,"memo":"생활비","tradedAt":"2026-08-06T09:00:00"}'
+tx "$CASH" deposit  '{"quantity":1200000,"memo":"원화 투자 대기금","tradedAt":"2026-08-06T09:00:00"}'
 tx "$KB"   withdraw '{"quantity":450000,"memo":"카드값","tradedAt":"2026-08-06T12:00:00"}'
 
-echo "▸ 환율 입력 (해외주식의 환율은 MVP 에서 수동 입력이다 — Roadmap 7-2)"
-setfx "$NVDA" 1417
+echo "▸ USD/KRW · USDT/KRW 자동 환율 확인"
 
 # 자동 조회가 성공했다면 그 값을 그대로 둔다. Yahoo Finance 가 죽어 있어 현재가가 비어 있을 때만
 # 폴백값을 넣어, 외부 API 상태와 무관하게 화면이 항상 채워지도록 한다 (PRD 8-1 대응).
@@ -63,5 +73,15 @@ else
   echo "  ✓ NVDA 자동 조회 성공: $NVDA_PRICE USD"
 fi
 
+echo "▸ Asset Analysis 발표용 90일 이력 준비 (local 전용)"
+DEMO_HISTORY=$(curl -s -X POST "$B/api/dashboard/demo-history" \
+  -H "Authorization: Bearer $T" -H 'Content-Type: application/json')
+DEMO_COUNT=$(printf '%s' "$DEMO_HISTORY" | sed -n 's/.*"createdCount":\([0-9]*\).*/\1/p')
+if [ -n "$DEMO_COUNT" ]; then
+  echo "  ✓ $DEMO_COUNT 개 과거 Snapshot 생성 · 화면에 DEMO HISTORY로 표시"
+else
+  echo "  ⚠ 발표용 이력 생성 생략: $DEMO_HISTORY"
+fi
+
 echo
-echo "✅ 완료. http://localhost:8080 에서 $EMAIL / $PASSWORD 로 로그인하세요."
+echo "✅ 완료. $B 에서 $EMAIL / $PASSWORD 로 로그인하세요."

@@ -1,7 +1,7 @@
 # Asset Dashboard - Project Direction Document
 
-> 이 문서는 Claude Code에게 전달하는 프로젝트 설계 문서입니다.
-> 구현 시 아래 원칙과 결정 사항을 반드시 따르며, 문서에 명시되지 않은 부분은 임의로 판단하지 말고 질문할 것.
+> 여러 시장에 흩어진 투자 Position과 투자 대기자금의 현재 KRW 가치 및 하루 변화를 한 화면에서 보여주는 MVP의
+> 제품·설계 기준이다. 2026-08-07 재정리된 Portfolio Overview 방향을 최신 결정으로 반영한다.
 
 ---
 
@@ -76,45 +76,60 @@ DeBank, Zerion 등을 그대로 따라 만들지 않는다. 대신 배치와 구
 **총 손익 = Unrealized PNL + Realized PNL**
 - Portfolio·Dashboard는 두 값을 **분리해서** 노출한다(합쳐서 하나로 보여주지 않는다).
 
-**Historical PNL — 제외**
-- 기간별 변화(예: 7일 전 대비 손익)는 포함하지 않는다. Snapshot이 필요하므로 Analytics(Roadmap).
+**Daily PNL — 포함**
+- 09:00 KST 경계를 기준으로 하루 1개의 Portfolio Snapshot을 유지한다.
+- `현재 총 투자자산 - 기준 Snapshot 가치 - 당일 순외부입금액`으로 계산한다.
+- BUY/SELL은 Portfolio 내부 이동이므로 보정하지 않고, DEPOSIT/WITHDRAW만 외부 자금 흐름으로 보정한다.
+- 서버 중단 등으로 09:00 이후 처음 확보했다면 과거 가격을 복원하지 않고 실제 확보 시각을 기준으로 표시한다.
 
 **환차손익(FX PNL) 분리 — 의도적 제외**
 - `avgPrice`는 매수 시점 환율로 환산된 KRW 값이고, 평가금액은 **현재** 환율로 계산된다. 따라서 이 프로젝트의 PNL에는 **주가 변동으로 인한 손익과 환율 변동으로 인한 손익이 섞여 있다.**
-- 이를 분리하려면 원통화 기준 평단가(`avgPriceInOriginalCurrency`)를 함께 관리해야 하는데, MVP에서는 "총 원화 기준 손익"만 보여주면 충분하다고 판단해 **인지한 상태로 제외**한다.
-- 확장 시: Asset에 `avgPriceOriginal` 컬럼을 추가하고 매수 시 함께 갱신하면, `환차손익 = quantity × avgPriceOriginal × (현재환율 - 매수시점가중평균환율)`로 분리 가능.
+- 화면에는 사용자가 익숙한 원통화 평단을 보여주기 위해 `avgPriceOriginal`도 유지한다. 다만 주가 손익과 환차손익을
+  별도 지표로 분리하는 attribution은 제외한다.
 
 **Analytics**
-- 이 프로젝트에서 Analytics는 **시계열 기반 분석 기능**(자산 성장 그래프, 기간별 수익률, 최고 수익률 기록 등)을 의미한다.
-- AssetSnapshot, Scheduler, Batch가 필요한 기능이며, MVP에서 제외한다.
+- Daily PnL을 누르면 진입하는 **Asset Analysis**를 포함한다. 오늘 손익, 현재 총자산, 평가·실현손익,
+  1D/7D/30D/90D 순자산 추이, 현재 자산 구성, 평가손익 순위를 보여준다.
+- 기간 차트는 Daily PnL용 Portfolio Snapshot과 현재 총자산을 사용한다. 입출금이 포함된 **순자산 추이**이며
+  투자 수익률로 표시하지 않는다.
+- TWR/MWR, 월별 수익률, 최고 수익률, 자산별 Daily 기여도 같은 정교한 성과 분석은 제외한다.
 
 **History**
-- Transaction History(거래 내역 목록)만 포함한다.
-- Asset의 시간에 따른 상태 변화 이력(스냅샷)은 포함하지 않는다.
+- 전체 거래 원장에서 활성 자산의 매수·매도·입금·출금을 검색·유형 필터로 조회한다. 항목을 누르면 해당 Asset
+  상세로 이동해 잘못 입력한 거래를 삭제하고 상태를 다시 계산할 수 있다.
+- Portfolio 전체의 일일 기준 Snapshot만 포함한다. 자산별 Snapshot은 포함하지 않는다.
 
 ### MVP 범위
 
 **포함 (Do)**
 - JWT 로그인 / 회원가입
 - Asset CRUD
+- 최초 등록 시 현재 보유량과 선택 평단 입력 (과거 BUY 거래를 강제로 생성하지 않음)
+- 첫 진입 시 KRW/USD/USDT 투자 대기자금을 0으로 자동 준비 (사용자가 정산 자산을 따로 등록하지 않음)
 - Transaction CRUD (입금/출금/매수/매도)
+- 거래 저장 전 보유량·정산 잔액·예상 평단 또는 실현손익 미리보기
+- BUY/SELL과 동일 통화 투자 대기자금 정산 연결
 - Dashboard (Facade 조립)
+- Portfolio Daily PnL + 실제 Snapshot 기준 시각
+- Asset Analysis (오늘 손익 진입, 1D/7D/30D/90D 순자산 추이, 자산 구성, 평가손익 순위)
 - Portfolio (View, Unrealized PNL 포함)
+- Asset Detail 최근 7일 시장가격 차트 (일봉, 15분 캐시·마지막 성공값 폴백)
+- 자산별 시세 출처·마지막 갱신 시각 표시와 개별 강제 새로고침
+- 전체 거래 내역 화면 (유형 필터, 자산명·심볼·메모 검색, Asset 상세 정정 연결)
 - Asset Allocation (Pie Chart, type 단위)
 - **자동 시세 조회**
   - STOCK: Yahoo Finance 비공식 API (국내 `.KS`/`.KQ`, 해외 그대로)
   - CRYPTO: Binance API(USDT 기준 가격) × Upbit KRW-USDT 마켓(환율) — 아래 참고
+  - FX: Yahoo Finance `KRW=X`(USD/KRW), Upbit `KRW-USDT`(USDT/KRW)
   - 공통: **symbol 단위 전역 캐시(15분 TTL)**, 타임아웃 2초, 실패 시 마지막 저장값 → 수동 입력 폴백
 
 **제외 (Don't) — Roadmap으로 이동**
-- Analytics (Historical PNL, 월별 변화, History Snapshot, Scheduler, Batch)
+- TWR/MWR, 월별 수익률, 최고 수익률, 자산별 Daily 기여도
 - **유료/공식 시세 API 전환** (TwelveData 등 — Yahoo Finance 프로바이더를 인터페이스로 교체하는 수준의 확장)
-- 해외주식(STOCK)의 환율 자동 조회 (계속 수동 입력 — CRYPTO의 환율 자동화와는 별개 문제, 아래 참고)
 - WalletConnect / Web3 Wallet 연동 (계좌 자체를 자동 동기화하는 것 — 시세 조회와는 다른 문제)
 - MyData / 증권사 API 연동
-- 전체 거래 내역 화면
 - 종목 단위 Allocation
-- Asset 검색 자동완성
+- 해외주식·암호화폐 검색 자동완성 (국내 KOSPI/KOSDAQ 종목명·코드 검색은 MVP 반영)
 
 > **자동 시세 조회를 MVP에 포함한 이유**: 이 프로젝트의 출발점은 "여러 거래소/증권사 앱을 매일 아침 돌아다니며 확인하는 번거로움"을 없애는 것이었다. 자산 수량은 한 번만 입력하면 되지만(Transaction), 가격은 매일 바뀌므로 수동 입력으로는 이 문제를 해결하지 못한다. 따라서 시세 자동 조회는 부가 기능이 아니라 핵심 가치와 직결된 기능으로 판단해 MVP에 포함한다. 다만 계좌 자체의 자동 동기화(WalletConnect, MyData)는 별도 인증/보안 인프라가 필요한 무거운 작업이라 계속 Roadmap에 남긴다.
 >
@@ -123,7 +138,7 @@ DeBank, Zerion 등을 그대로 따라 만들지 않는다. 대신 배치와 구
 ### 성공 기준
 
 **사용자 관점**
-- 로그인 후 5초 안에 자신의 총 자산, Investment 비중, 최근 거래를 확인할 수 있어야 한다.
+- 로그인 후 5초 안에 자신의 총 투자자산, 오늘 손익, 현재 Position과 투자 대기자금을 확인할 수 있어야 한다.
 
 **설계 관점**
 - Asset을 유일한 Aggregate Root로 설계하고, Dashboard·Portfolio·Allocation은 모두 Asset을 기반으로 한 조회(View)로 구현한다.
@@ -175,10 +190,14 @@ DeBank, Zerion 등을 그대로 따라 만들지 않는다. 대신 배치와 구
 | symbol | String | not null — **시세 조회에 사용하는 불변 키.** `BTC`, `NVDA`, `000660.KS`. CASH/BANK는 통화 코드(`KRW`, `USD`)를 넣는다. **등록 후 수정 불가** |
 | name | String | not null — **화면 표시용 이름.** 사용자가 자유롭게 수정 가능(`내 비트코인`, `KB국민은행`). 시세 조회에 절대 사용하지 않음 |
 | quantity | BigDecimal | not null, default 0 — **보유 수량.** CASH/BANK는 "보유 금액"이 곧 수량이며, `currentPrice = 1`로 두어 평가금액 공식이 모든 타입에 동일하게 적용된다 |
+| initialQuantity | BigDecimal | nullable — 서비스 사용 시작 시 입력한 현재 보유 수량. 거래 이력 재계산의 기준 상태 |
 | avgPrice | BigDecimal | nullable — **항상 KRW 기준** (매수 시점 환율로 환산된 값). CASH/BANK는 1 |
+| avgPriceOriginal | BigDecimal | nullable — 화면에 표시할 원래 통화 기준 평단. 평단을 모르면 null |
+| initialAvgPrice / initialAvgPriceOriginal | BigDecimal | nullable — 최초 Position의 재계산 기준 평단 |
 | currentPrice | BigDecimal | nullable — **원래 통화 기준** (USD, USDT 등 그대로). **CASH/BANK는 항상 1로 고정** |
 | currency | String | not null — currentPrice가 어떤 통화인지 표시용 |
-| exchangeRate | BigDecimal | not null, default 1 — **현재** 환율. **CRYPTO는 Upbit KRW-USDT 마켓에서 자동 조회**, **해외주식은 수동 입력**, **국내주식·원화현금은 1로 고정**(이미 KRW) |
+| exchangeRate | BigDecimal | nullable — **현재** 환율. USD는 Yahoo `KRW=X`, USDT는 Upbit `KRW-USDT`, KRW는 1 |
+| exchangeRateUpdatedAt | LocalDateTime | nullable — 현재 환율 마지막 갱신 시각 |
 | realizedPnl | BigDecimal | not null, default 0 — **누적 실현손익(KRW).** 매도 시에만 증감 |
 | source | Enum | MANUAL, CSV, API, MYDATA, WEB3 — STOCK/CRYPTO는 API(자동 조회 성공 시), 나머지는 MANUAL |
 | priceUpdatedAt | LocalDateTime | nullable — currentPrice가 마지막으로 갱신된 시각 |
@@ -257,10 +276,12 @@ updateCurrentPrice(price)     // 원래 통화 기준 시세 갱신, Transaction
                                //   └ 자동 조회 성공 시 / 사용자 수동 입력 시 모두 이 메서드를 통해서만 갱신
 updateExchangeRate(rate)      // 현재 환율 갱신, Transaction 생성 안 함
 
-getValuation()                 // 평가금액(KRW) = quantity × currentPrice × exchangeRate
+getValuation()                 // 평가금액(KRW) = quantity × currentPrice × 현재환율
                                 //   CASH/BANK는 currentPrice가 1로 고정되어 있으므로
-                                //   타입 분기 없이 동일한 공식이 적용된다
+                                //   타입 분기 없이 동일한 공식이 적용된다.
+                                //   외화 자산의 현재환율이 없으면 null (1원으로 오인 계산하지 않음)
 getUnrealizedPnl()             // 평가금액(KRW) - (quantity × avgPrice)
+                                //   평단이 없으면 0원 원가로 계산하지 않고 null
 getRealizedPnl()               // 누적 실현손익 (필드 반환)
 getPnlRate()                   // 매입금액(quantity × avgPrice)이 0이면 null 반환
                                 //   (수량 0인 자산 / 미매수 자산에서 0으로 나누기 방지)
@@ -278,14 +299,16 @@ getPnlRate()                   // 매입금액(quantity × avgPrice)이 0이면 
 | type | Enum | DEPOSIT, WITHDRAW, BUY, SELL |
 | quantity | BigDecimal | not null |
 | price | BigDecimal | nullable (DEPOSIT/WITHDRAW는 의미 없음, 거래 시점 원래 통화 기준) |
-| exchangeRate | BigDecimal | nullable — **BUY와 SELL 모두 필수** (거래 시점의 환율) |
+| exchangeRate | BigDecimal | nullable — 거래 시점 환율. 요청의 `exchangeRateMode=MANUAL`일 때 사용 |
+| settlementAssetId | Long | BUY/SELL 요청에서는 필수 — 대금을 주고받은 같은 통화의 CASH/BANK id |
+| settlementAmount | BigDecimal | nullable — 정산된 원래 통화 금액(quantity × price) |
 | memo | String | nullable |
 | tradedAt | LocalDateTime | not null (사용자가 지정한 거래 시점) |
 | createdAt | LocalDateTime | not null (레코드 생성 시점) |
 
 도메인 메서드: 없음 (단순 기록. 상태 변경 책임은 Asset에 있음)
 
-> **SELL에도 `exchangeRate`를 받는 이유**: 실현손익을 KRW 기준으로 확정하려면 매도 시점의 환율이 필요하다(`(매도가 × 매도환율 - avgPrice) × 수량`). 이전 설계는 SELL에서 `price`만 받고 환율은 받지 않았는데, 그러면 `price`가 기록만 되고 어디에도 쓰이지 않는 값이 된다. 국내주식·원화현금은 항상 1을 넘긴다.
+> **SELL에도 `exchangeRate`를 저장하는 이유**: 실현손익을 KRW 기준으로 확정하려면 매도 시점의 환율이 필요하다(`(매도가 × 매도환율 - avgPrice) × 수량`). 과거 외화 거래는 `exchangeRateMode=MANUAL`과 당시 환율을 필수로 받아 현재 환율이 과거 손익에 섞이지 않게 한다. 국내주식·원화현금은 항상 1을 사용한다.
 >
 > **환율 스냅샷을 Transaction에 남기는 이유**: `assets.exchange_rate`는 **현재** 환율이라 계속 덮어써진다. 거래 시점의 환율은 그 순간에만 존재하는 사실이므로 이벤트 레코드에 함께 박아둬야 나중에 재계산·검증이 가능하다.
 
@@ -304,6 +327,7 @@ Asset (1) ─── (N) Transaction
 | PortfolioView | AssetService.getInvestmentAssets() | STOCK+CRYPTO 필터링, 평가금액·Unrealized PNL·Realized PNL·`priceStale` 포함 |
 | AllocationView | AssetService.getAllocation() | type별 KRW 환산 합산 비율 (Pie Chart용) |
 | DashboardResponse | DashboardFacade | 총자산(KRW 환산) + AllocationView + 최근 Transaction N건 |
+| DailyPnlView | DailyPnlService | 현재 총액 - Snapshot - 순외부입금액, 실제 기준 시각 포함 |
 
 > **View는 모두 Entity를 그대로 노출하지 않는다.** Asset 엔티티에는 `userId`, `version`, `deletedAt`처럼 클라이언트가 알 필요 없는 필드가 있고, 엔티티를 직접 직렬화하면 필드 추가 시 의도치 않게 외부로 새어나간다. 조회 결과는 반드시 별도 DTO로 변환해 응답한다.
 
@@ -339,11 +363,17 @@ users (1) ────< assets (N) ────< transactions (N)
 | symbol | VARCHAR(30) | NOT NULL — 시세 조회 키 (등록 후 불변) |
 | name | VARCHAR(100) | NOT NULL — 표시용 이름 (수정 가능) |
 | quantity | DECIMAL(20,8) | NOT NULL, DEFAULT 0 |
+| initial_quantity | DECIMAL(20,8) | NULL — 최초 등록 Position 수량 |
+| position_corrected_at | DATETIME | NULL — 마지막 최초 보유 수량 정정 시각 |
 | avg_price | DECIMAL(20,8) | NULL (KRW 기준) |
+| avg_price_original | DECIMAL(20,8) | NULL (원래 통화 기준) |
+| initial_avg_price | DECIMAL(20,8) | NULL — 거래 재생 기준 KRW 평단 |
+| initial_avg_price_original | DECIMAL(20,8) | NULL — 거래 재생 기준 원통화 평단 |
 | current_price | DECIMAL(20,8) | NULL (원래 통화 기준, CASH/BANK는 1) |
 | price_updated_at | DATETIME | NULL — 마지막 시세 갱신 시각 |
 | currency | VARCHAR(10) | NOT NULL |
-| exchange_rate | DECIMAL(10,4) | NOT NULL, DEFAULT 1 |
+| exchange_rate | DECIMAL(10,4) | NULL |
+| exchange_rate_updated_at | DATETIME | NULL |
 | realized_pnl | DECIMAL(20,8) | NOT NULL, DEFAULT 0 — 누적 실현손익(KRW) |
 | source | VARCHAR(20) | NOT NULL, DEFAULT 'MANUAL' |
 | version | BIGINT | NOT NULL, DEFAULT 0 — 낙관적 락 |
@@ -366,14 +396,28 @@ users (1) ────< assets (N) ────< transactions (N)
 | quantity | DECIMAL(20,8) | NOT NULL |
 | price | DECIMAL(20,8) | NULL |
 | exchange_rate | DECIMAL(10,4) | NULL |
+| settlement_asset_id | BIGINT | NULL — 기존 거래 호환을 위해 DB는 nullable, 신규 BUY/SELL 요청에서는 필수 |
+| settlement_amount | DECIMAL(20,8) | NULL — 원래 통화 정산액 |
 | memo | VARCHAR(255) | NULL |
 | traded_at | DATETIME | NOT NULL |
 | created_at | DATETIME | NOT NULL |
 
 인덱스: `(asset_id, traded_at DESC)` — 최근 거래 조회 시 정렬 비용 절감.
 
+### portfolio_snapshots
+| 컬럼 | 타입 | 제약 |
+|---|---|---|
+| id | BIGINT | PK, AUTO_INCREMENT |
+| user_id | BIGINT | NOT NULL |
+| snapshot_date | DATE | NOT NULL — 09:00 KST 경계 기준 날짜 |
+| total_value_krw | DECIMAL(20,2) | NOT NULL |
+| captured_at | DATETIME | NOT NULL — 실제 기준값 확보 시각 |
+| created_at | DATETIME | NOT NULL |
+
+유니크 제약: `(user_id, snapshot_date)` — 사용자별 하루 1개 기준점.
+
 ### 의도적 생략
-- `asset_snapshots` 테이블 — Analytics/History 기능이 Roadmap이므로 없음
+- 자산별 Snapshot — Daily PnL은 Portfolio 전체 Snapshot 하나만 사용한다
 - `exchange_rates` 별도 테이블 — `assets.exchange_rate`에 값으로만 저장 (환율 이력 관리 안 함)
 - **`price_cache` 테이블 — 만들지 않는다.** 전역 시세 캐시는 애플리케이션 메모리(`ConcurrentHashMap<CacheKey, CachedPrice>`)에 둔다.
   - **이유**: MVP는 단일 인스턴스로 운영되며, 캐시는 15분이면 만료되는 휘발성 데이터다. 서버 재시작 시 캐시가 비어도 `assets.current_price`(마지막 성공값)가 폴백으로 남아 있으므로 데이터 손실이 아니다. 테이블/Redis를 추가하는 것은 이 규모에서 과설계다.
@@ -415,6 +459,18 @@ assetRepository.findByIdAndUserId(assetId, currentUserId)
 
 ### 4-1. 인증 (Auth)
 
+**이메일 중복확인**
+```
+GET /api/auth/email-availability?email=test@example.com
+인증 필요: X
+```
+Response:
+```json
+{ "email": "test@example.com", "available": true, "message": "사용 가능한 이메일입니다." }
+```
+중복확인은 사용자 입력 편의를 위한 사전 확인이다. 확인 직후 다른 요청이 같은 이메일로 가입할 수 있으므로
+`POST /api/auth/signup`에서 다시 검사하고, DB의 `users.email` 유니크 제약을 최종 방어선으로 유지한다.
+
 **회원가입**
 ```
 POST /api/auth/signup
@@ -425,6 +481,14 @@ Request:
 { "email": "test@example.com", "password": "1234abcd", "nickname": "재동" }
 ```
 비밀번호 규칙: 8자 이상 (특수문자 강제 없음)
+
+회원가입 화면은 이메일 중복확인, 닉네임, 비밀번호, 비밀번호 확인을 각각 입력받는다. 비밀번호 확인은 저장할
+도메인 값이 아니므로 프론트에서 일치 여부만 검증하고 서버에는 비밀번호 한 번만 전송한다. 비밀번호 원문은 저장하지
+않고 BCrypt 해시만 저장한다.
+
+첫 인증 후 Dashboard/Asset 조회 시 `KRW`, `USD`, `USDT` CASH 자산을 각각 0으로 자동 준비한다. 세 자산만
+있고 잔액이 모두 0이면 빈 Portfolio 화면과 Daily PnL 미시작 상태를 유지한다. 기존 사용자도 다음 진입 때 빠진
+통화만 자동 보완한다.
 
 **로그인**
 ```
@@ -443,23 +507,40 @@ Response:
 
 ### 4-2. Asset
 
-**Asset 등록** (이름 직접 입력, 최초 1회 — 자동완성/자동생성 없음)
+**Asset 등록** (최초 1회 — 국내주식은 종목명·코드 자동완성, 그 외는 직접 입력)
 ```
 POST /api/assets
 인증 필요: O
 ```
 Request:
 ```json
-{ "type": "CRYPTO", "symbol": "BTC", "name": "비트코인", "currency": "USDT" }
+{
+  "type": "CRYPTO",
+  "symbol": "ZEC",
+  "market": null,
+  "name": "Zcash",
+  "currency": "USDT",
+  "quantity": 14.7,
+  "averagePrice": 370.40,
+  "averageExchangeRate": 1380
+}
 ```
+
+`quantity`는 서비스 시작 시점의 현재 보유량이며 BUY Transaction을 생성하지 않는다. `averagePrice`와
+`averageExchangeRate`는 선택값이고, 평단을 모르면 생략해도 평가금액은 표시하되 평가손익·수익률은 `null`로 응답한다.
+
+> **사용자 입력과 외부 시세 키 분리**: 사용자는 Yahoo Finance용 접미사를 직접 입력하지 않는다. 국내주식은 `symbol=000660`과
+> `market=KOSPI`를 보내고 서버가 내부 저장 키를 `000660.KS`로 조합한다. KOSDAQ은 `.KQ`, 해외주식은 티커를 그대로 사용한다.
+> 저장된 `symbol`은 외부 조회용 불변 키로 유지하되, 화면에는 `displaySymbol`(예: `000660`)을 별도로 내려보낸다. 기존 API의
+> `000660.KS` 직접 입력도 호환한다.
 Response:
 ```json
-{ "id": 5, "type": "CRYPTO", "symbol": "BTC", "name": "비트코인", "quantity": 0, "avgPrice": null, "currentPrice": null, "currency": "USDT", "exchangeRate": 1, "realizedPnl": 0 }
+{ "id": 5, "type": "CRYPTO", "symbol": "ZEC", "displaySymbol": "ZEC", "name": "Zcash", "quantity": 14.7, "avgPrice": 511152, "avgPriceOriginal": 370.40, "currency": "USDT", "exchangeRate": 1412, "valuationKRW": 10556705.04, "unrealizedPnl": 3042770.64, "costBasisMissing": false }
 ```
 
 **등록 시점 symbol 검증 (필수)**
 STOCK/CRYPTO 등록 시, 해당 `symbol`이 외부 API에서 실제로 조회되는지 **1회 확인**한 뒤 저장한다. 조회에 성공하면 그 가격을 `currentPrice` 초기값으로 함께 저장한다.
-- 실패 시: `400 INVALID_SYMBOL` — "해당 심볼의 시세를 찾을 수 없습니다. 국내주식은 `000660.KS` 형식으로 입력해주세요."
+- 실패 시: `400 INVALID_SYMBOL` — "해당 심볼의 시세를 찾을 수 없습니다. 국내주식은 시장과 6자리 종목코드를 확인해주세요."
 - 외부 API 자체가 응답하지 않는 경우(타임아웃): 검증을 통과시키고 등록을 허용한다. 외부 장애로 자산 등록 자체가 막히면 안 된다.
 
 > **왜 등록 시점에 검증하는가**: 검증이 없으면 사용자가 `BITCOIN`처럼 잘못된 심볼을 입력해도 그대로 저장되고, 이후 시세 조회는 "실패해도 예외를 던지지 않는" 정책 때문에 **조용히 계속 실패**한다. 사용자는 대시보드에 자산이 0원으로 표시되는 이유를 영원히 알 수 없다. API 호출 1번으로 막을 수 있는 침묵형 버그다.
@@ -481,6 +562,19 @@ DELETE /api/assets/{id}    -- Soft Delete (deleted_at 기록, 거래 내역 보�
 > **Soft Delete를 쓰는 이유**: 자산 관리 서비스에서 거래 기록을 물리 삭제하는 것은 방어하기 어렵다. 사용자가 실수로 삭제했을 때 복구 수단이 없고, "이 자산에서 얼마 벌었나"라는 확정된 사실(`realizedPnl`)까지 함께 사라진다. `assets.deleted_at`(nullable) 컬럼을 두고 모든 조회에서 `deleted_at IS NULL` 조건을 적용한다. Transaction은 손대지 않는다.
 >
 > **`symbol`을 수정 불가로 두는 이유**: symbol이 바뀌면 그 Asset에 쌓인 거래 내역·평단가가 전혀 다른 종목의 것과 섞인다. 종목을 바꾸고 싶으면 새 Asset을 등록하는 것이 맞다. 표시 이름만 바꾸고 싶은 경우는 `name` 수정으로 해결된다.
+
+**최초 보유 수량 오입력 정정** (Transaction 생성 안 함)
+```
+PATCH /api/assets/{id}/quantity
+Request: { "quantity": 14.7 }
+```
+
+사용자는 차감량이 아니라 확인한 **현재 실제 보유 수량**을 입력한다. 서버는 `실제 수량 - 현재 기록 수량`만큼
+최초 등록 수량을 보정하고 기존 거래를 `tradedAt` 순으로 다시 재생한다. 매도·정산 이벤트를 만들지 않으므로
+대기자금이 움직이거나 가짜 실현손익이 생기지 않는다. 정정으로 기존 매도 시점의 수량이 음수가 되면 400으로
+거부한다. 잘못 입력한 BUY/SELL 자체는 이 API가 아니라 해당 거래 삭제로 정정한다. 이미 오늘 손익 Snapshot이
+생긴 뒤 정정했다면 데이터 수정과 시장 손익을 분리할 기준이 없으므로 그 기준일의 Daily PnL은 `-`와 안내 문구로
+표시하고 다음 09:00 KST 기준부터 다시 계산한다.
 
 **현재가 조회/갱신** (Transaction 생성 안 함)
 
@@ -528,7 +622,7 @@ POST /api/assets/{id}/transactions/buy
 ```
 Request:
 ```json
-{ "quantity": 0.1, "price": 40000, "exchangeRate": 1380, "tradedAt": "2026-08-06T10:00:00" }
+{ "quantity": 0.1, "price": 40000, "exchangeRate": 1380, "exchangeRateMode": "MANUAL", "settlementAssetId": 7, "tradedAt": "2026-08-06T10:00:00" }
 ```
 Response:
 ```json
@@ -538,13 +632,15 @@ Response:
 **매도**
 ```
 POST /api/assets/{id}/transactions/sell
-Request: { "quantity": 0.2, "price": 56000000, "exchangeRate": 1380, "tradedAt": "..." }
+Request: { "quantity": 0.2, "price": 56000000, "exchangeRate": 1380, "exchangeRateMode": "MANUAL", "settlementAssetId": 7, "tradedAt": "..." }
 ```
 Response:
 ```json
 { "transactionId": 13, "asset": { "id": 5, "quantity": 0.4, "avgPrice": 68500000, "realizedPnl": 1420000 } }
 ```
-- `exchangeRate`는 실현손익을 KRW로 확정하기 위해 필요하다. 국내주식·원화현금은 `1`.
+- `exchangeRateMode=AUTO`: 오늘 거래에서 Asset에 저장된 현재 환율을 사용한다. 값이 없으면 수동 입력을 안내한다.
+- `exchangeRateMode=MANUAL`: 요청의 `exchangeRate`를 사용한다. 과거 외화 거래는 이 모드만 허용한다.
+- 국내주식·원화현금은 모드와 무관하게 서버가 `1`을 사용한다.
 - 매도 후에도 `avgPrice`는 변하지 않는다 (남은 수량의 원가는 그대로).
 - 보유 수량 초과 시 `INSUFFICIENT_ASSET_QUANTITY` 에러.
 
@@ -552,7 +648,8 @@ Response:
 ```
 POST /api/assets/{id}/transactions/deposit
 POST /api/assets/{id}/transactions/withdraw
-Request: { "quantity": 1000000, "tradedAt": "...", "memo": "월급 입금" }
+원화 Request: { "quantity": 1000000, "tradedAt": "...", "memo": "월급 입금" }
+외화 과거 Request: { "quantity": 1200, "exchangeRate": 1375, "exchangeRateMode": "MANUAL", "tradedAt": "..." }
 ```
 
 **특정 Asset의 거래 내역 조회**
@@ -569,10 +666,20 @@ GET /api/assets/{id}/transactions
 GET /api/dashboard
 인증 필요: O
 ```
+> `?force=true`를 붙이면 상단 새로고침처럼 시세 TTL을 건너뛰고 외부 시세 API에 재조회한다. 기본값은 `false`이며 일반 화면 진입은 캐시를 사용한다.
 Response:
 ```json
 {
   "totalAssetKRW": 15000000,
+  "dailyPnl": {
+    "amountKRW": 241200,
+    "rate": 1.42,
+    "baselineValueKRW": 16985915,
+    "netExternalFlowKRW": 0,
+    "baselineAt": "2026-08-07T09:03:12",
+    "available": true,
+    "unavailableReason": null
+  },
   "investmentSummary": {
     "valuationKRW": 12000000,
     "unrealizedPnl": 300000,
@@ -580,6 +687,14 @@ Response:
     "realizedPnl": 1420000
   },
   "cashSummary": { "valuationKRW": 3000000 },
+  "marketRates": {
+    "usdKrw": 1415.78,
+    "usdSource": "Yahoo Finance KRW=X",
+    "usdUpdatedAt": "2026-08-07T10:03:00",
+    "usdtKrw": 1417.0,
+    "usdtSource": "Upbit KRW-USDT",
+    "usdtUpdatedAt": "2026-08-06T10:03:00"
+  },
   "allocation": [
     { "type": "STOCK", "ratio": 50.0 },
     { "type": "CRYPTO", "ratio": 30.0 },
@@ -587,21 +702,43 @@ Response:
   ],
   "recentTransactions": [
     { "assetName": "BTC", "type": "BUY", "quantity": 0.1, "tradedAt": "2026-08-06T10:00:00" }
-  ]
+  ],
+  "priceStale": false,
+  "exchangeRateMissing": false
 }
 ```
+
+**Asset Analysis 순자산 이력**
+```
+GET /api/dashboard/history?days=90
+인증 필요: O
+```
+> 하루 1개의 Portfolio Snapshot을 오래된 순서로 반환한다. 화면은 여기에 현재 총자산을 마지막 점으로 붙인다.
+> 입출금 보정을 하지 않은 실제 자산 총액이므로 API와 화면 모두 이를 수익률이 아닌 순자산 추이로 명시한다.
+> local 프로필의 `scripts/seed-demo.sh`는 발표 시 차트를 설명할 수 있도록 과거 89개 시연용 Snapshot을 추가한다.
+> 이 값은 `demoData: true`와 화면의 `DEMO HISTORY` 배지로 실제 이력과 명확히 구분되며 mysql 운영 프로필에는
+> 시드 API 자체가 생성되지 않는다.
+
+**개별 자산 시세 강제 갱신**
+```
+POST /api/assets/{assetId}/refresh
+인증 필요: O
+```
+> 선택한 자산 하나의 시세와 환율만 TTL을 건너뛰고 다시 조회한다. 실패하면 마지막 성공값을 유지한다.
 
 ### 4-5. Portfolio
 ```
 GET /api/portfolio?type={type}&sort=unrealizedPnl,desc
 인증 필요: O
 ```
+> `?force=true`를 붙이면 시세 캐시를 건너뛰고 외부 시세 API에 재조회한다.
 Response:
 ```json
 [
   {
-    "assetId": 5, "symbol": "BTC", "name": "비트코인", "type": "CRYPTO",
+    "assetId": 5, "symbol": "BTC", "displaySymbol": "BTC", "name": "비트코인", "type": "CRYPTO",
     "quantity": 0.6, "avgPrice": 68500000, "currentPrice": 56000000,
+    "currency": "USDT", "exchangeRate": 1390, "exchangeRateMissing": false,
     "valuationKRW": 33600000,
     "unrealizedPnl": 3100000, "unrealizedPnlRate": 10.16,
     "realizedPnl": 1420000,
@@ -613,6 +750,8 @@ Response:
 - `sort=unrealizedPnl,desc` 기본값 (평가손익 높은 순)
 - **`unrealizedPnlRate`는 매입금액이 0이면 `null`** (수량 0 자산, 미매수 자산). 프론트는 `null`일 때 `-`로 표시한다. 0으로 나누기를 방지하기 위한 명시적 규칙이다.
 - `priceStale: true`면 시세 조회에 실패해 오래된 값을 쓰고 있다는 뜻. 화면에 "N분 전 기준" 표시.
+- `exchangeRateMissing: true`는 정확히는 "보유 수량이 있는데 현재 환율이 없어 원화 평가가 막힌 상태"다. 수량이 0이면 환율이 없어도 평가금액이 정확히 0원이므로 false이며 경고 배지를 표시하지 않는다. true일 때 `valuationKRW`, `unrealizedPnl`, `unrealizedPnlRate`는 `null`이다.
+- `marketRates.usdtKrw`는 암호화폐 시세 조회에서 함께 얻은 Upbit KRW-USDT 가격이다. 화면의 `오늘의 기준 환율` 카드에 출처와 마지막 갱신 시각을 함께 표시한다.
 
 ### 4-6. Allocation
 - 별도 API 없음. Dashboard 응답의 `allocation` 필드로 대체.
@@ -625,7 +764,9 @@ Response:
 
 | 코드 | HTTP | 상황 |
 |---|---|---|
-| INSUFFICIENT_ASSET_QUANTITY | 400 | 매도/출금 수량이 보유 수량보다 많을 때 |
+| INSUFFICIENT_ASSET_QUANTITY | 400 | 매도/출금 수량이 보유 수량보다 많을 때 — 자산명과 단위 포함 |
+| INSUFFICIENT_SETTLEMENT_FUNDS | 400 | 매수대금을 지급할 대기자금 잔액이 부족할 때 |
+| SETTLEMENT_CURRENCY_MISMATCH | 400 | 투자 자산과 선택한 정산 자산의 통화가 다를 때 |
 | INVALID_INPUT | 400 | 필수 필드 누락, 값 범위 위반 등 |
 | INVALID_SYMBOL | 400 | Asset 등록 시 외부 API에서 조회되지 않는 심볼 |
 | UNAUTHORIZED | 401 | 토큰 없음 / 만료 / 위조 |
@@ -641,7 +782,8 @@ Response:
 |---|---|
 | `quantity` (모든 Transaction) | 0보다 커야 함 (0 이하이면 `INVALID_INPUT`) |
 | `price` (BUY/SELL) | 0보다 커야 함 |
-| `exchangeRate` (**BUY/SELL 모두 필수**) | 0보다 커야 함 |
+| `exchangeRateMode` (외화 Transaction) | `AUTO` 또는 `MANUAL`. 생략하면 AUTO. 과거 거래는 MANUAL만 허용 |
+| `exchangeRate` (외화 Transaction) | MANUAL이면 필수·0보다 커야 함. AUTO이면 보내지 않음 |
 | `symbol` (Asset 등록) | 빈 문자열 불가, 영문·숫자·`.`만 허용, 최대 30자, **대문자로 정규화 후 저장** |
 | `name` (Asset 등록) | 빈 문자열 불가, 최대 100자 |
 | `tradedAt` (모든 Transaction) | 미래 시각 불가 (`@PastOrPresent`) |
@@ -661,20 +803,21 @@ Response:
 ### Dashboard (첫 화면)
 ```
 ┌─────────────────────────────────┐
-│  총 자산  ₩15,000,000            │
+│  총 투자자산  ₩15,000,000         │
+│  오늘 손익 +₩241,200 (+1.42%)     │
+│  09:03 기준 · 외부 입출금 반영      │
 ├─────────────────────────────────┤
-│  Investment Summary               │  → 탭 시 Investment 화면 이동
+│  보유 Position / 평가손익           │  → 탭 시 Asset Detail
 ├─────────────────────────────────┤
-│  Asset Allocation (Pie Chart)     │  → 탭 시 Investment 화면 이동 (필터 없음)
+│  Asset Allocation                 │
 ├─────────────────────────────────┤
-│  Cash/Bank 요약                   │  → 탭 시 Assets 화면 이동
+│  KRW / USD / USDT 투자 대기자금     │
 ├─────────────────────────────────┤
-│  최근 거래 (최대 5건)                │  → 항목 탭 시 해당 Asset 거래내역 이동
-│                                    │
+│  최근 거래       USD/KRW · USDT/KRW │
 │                            (FAB +)│  → 자산등록/매수매도/입출금 선택
 └─────────────────────────────────┘
 ```
-- "전체 거래 보기" 링크 없음 (전체 Transactions 화면 자체를 MVP에서 제외)
+- 최근 활동의 `전체보기`는 활성 Asset의 거래 API를 합쳐 전체 거래 원장으로 이동한다.
 
 **빈 상태 (Empty State)**: 신규 가입 직후 Asset이 하나도 없으면 위 카드들 대신 안내 화면을 보여준다.
 ```
@@ -708,40 +851,50 @@ Response:
 └─────────────────────────────────┘
 ```
 
-### Transactions (특정 Asset 거래 내역만 존재)
+### Transactions
 ```
 ┌─────────────────────────────────┐
-│  BTC 거래 내역                     │
-│  BUY  0.1개  40,000 USDT×1,380   │
-│  08/06 10:00                      │
+│  전체 / 매수 / 매도 / 입금 / 출금     │
+│  [자산명·심볼·메모 검색]              │
+├─────────────────────────────────┤
+│  BTC 매도  0.2 · +11,200 USDT     │
+│  08/04 10:00 · 일부 익절            │
 └─────────────────────────────────┘
 ```
-호출 API: `GET /api/assets/{id}/transactions`
+화면은 활성 Asset별 `GET /api/assets/{id}/transactions`를 병렬 조회해 합친다. 행을 누르면 해당 Asset 상세로
+돌아가므로 Transaction을 독립 Aggregate처럼 수정하는 전역 API는 만들지 않는다.
 
-### FAB 입력 흐름 (2단계 — 자동완성/자동생성 없음)
+### FAB 입력 흐름 (2단계 — 국내주식 자동완성, Asset 자동생성 없음)
 ```
 [FAB 클릭] → "무엇을 하시겠어요?" → [자산 등록] / [매수·매도] / [입금·출금]
 
 [자산 등록]                    [매수·매도·입출금]
-심볼 입력 (BTC, NVDA…)          Dropdown에서 기존 Asset 선택
-표시 이름 입력 (선택)             가격/수량/환율 입력
-타입/통화 선택                   → POST /api/assets/{id}/transactions/*
+유형별 입력                    Dropdown에서 기존 Asset 선택
+  국내주식: 종목명/코드 검색·선택   가격/수량/환율 입력
+  해외주식: 시장 + 티커 직접 입력
+  암호화폐: 심볼                 → POST /api/assets/{id}/transactions/*
+  은행/현금: 표시명 + 통화
 → POST /api/assets
    └ 저장 전 심볼 유효성 확인
      (실패 시 INVALID_SYMBOL)
 ```
 > Transaction이 Asset을 자동 생성하지 않는다 — Asset 등록과 거래 입력을 명확히 분리해 Aggregate 경계를 지키고, 자유 텍스트 입력으로 인한 이름 표기 불일치(BTC/bitcoin/비트코인)를 방지한다.
 >
-> **STOCK 등록 시 심볼 입력 형식 안내**: 국내주식은 `000660.KS`(코스피) / `.KQ`(코스닥)처럼 시장 접미사를 포함해서 입력해야 Yahoo Finance 조회가 된다. 해외주식은 `NVDA`처럼 티커만 입력한다. 자산 등록 화면의 **심볼** 입력 필드 아래에 이 형식을 안내 문구로 표시한다.
+> **STOCK 등록 시 입력 형식 안내**: 국내주식은 KRX KIND 상장법인목록의 정적 카탈로그에서 종목명 또는 6자리
+> 코드를 검색한다. `SK`, `하이닉스`, `000660`으로 찾은 결과를 선택하면 종목명·시장·KRW 통화가 자동으로
+> 채워지고, 서버는 시장에 맞춰 Yahoo Finance용 `.KS` 또는 `.KQ`를 붙인다. 카탈로그 로딩 실패나 신규 상장 반영
+> 전에는 종목코드와 시장을 직접 입력하는 기존 경로를 그대로 사용한다. 해외주식은 `NVDA`처럼 티커를 직접 입력한다.
 >
 > **표시 이름(name)은 선택 입력**: 비워두면 심볼을 그대로 표시 이름으로 사용한다. 화면에는 항상 `name`을 노출하고 `symbol`은 보조 정보로 작게 표시한다(`비트코인 · BTC`). 사용자가 `000660.KS`라는 기계적 문자열을 계속 보게 되는 것을 막기 위함이다.
 >
-> **심볼 검증은 저장 버튼을 누른 시점에 수행한다**: 입력 중 실시간 검증(자동완성)은 MVP에서 제외했으므로(Roadmap 7-6), 저장 시 1회 확인하고 실패하면 폼에 에러를 표시한다.
+> **자동완성과 시세 검증은 역할이 다르다**: 국내 종목 자동완성은 사용자의 입력을 돕는 로컬 카탈로그이고,
+> 저장 시 외부 시세 조회를 통한 심볼 유효성 검증은 기존대로 1회 수행한다. 자동완성 결과를 선택했더라도 상장폐지나
+> provider 장애가 있을 수 있으므로 서버 검증을 생략하지 않는다.
 
 ### 화면 흐름 요약도
 ```
 [로그인] → [Dashboard]
-              ├─ Investment Summary/Allocation 탭 → [Investment]
+              ├─ 보유 Position 행 → [Asset Detail]
               ├─ Cash 요약 탭 → [Assets]
               ├─ 최근 거래 항목 탭 → [Transactions - 특정 Asset]
               └─ FAB(+) → [자산등록/매수매도/입출금 모달]
@@ -749,6 +902,13 @@ Response:
 [Investment] → 카드 탭 → [Transactions - 특정 Asset]
 [Assets] → 카드 탭 → [Transactions - 특정 Asset]
 ```
+
+Dashboard의 `TOTAL NET WORTH` 옆 눈 아이콘은 개인 금액 표시를 전환한다. 숨김 상태에서는 총 투자자산,
+보유수량·평단, 평가금액·손익, Cash 잔액과 Analysis의 금액을 마스킹하며 공개 시장 참고값인 현재가와 환율은
+그대로 둔다. 설정은 브라우저에 저장되어 새로고침 후에도 유지된다.
+
+620px 이하 모바일 화면에서는 데스크톱의 현재가·보유량 열을 접는다. 각 보유자산에 `현재가 보기` 버튼을 제공해
+자산 상세 화면을 열지 않고 해당 종목의 공개 시장 현재가만 펼쳐볼 수 있다.
 
 ---
 
@@ -859,7 +1019,7 @@ public TransactionResponse buy(Long assetId, Long currentUserId, BuyRequest requ
 
 **동시성 처리 방식과 그 선택 이유**
 
-같은 Asset에 매수 요청이 거의 동시에 두 번 들어오는 상황(버튼 연타, 자동매매)에서 "읽고-계산하고-쓰기" 구조는 갱신 유실(Lost Update)이 발생한다. 세 가지 선택지를 검토했다.
+같은 사용자의 동일 통화 거래가 거의 동시에 들어오는 상황에서 "읽고-계산하고-쓰기" 구조는 갱신 유실(Lost Update)이 발생한다. 정산 연동 후에는 BTC와 ETH처럼 서로 다른 투자 자산도 사용자별 USDT/USD 대기자금을 함께 갱신하므로 같은 정산 자산의 version에서 충돌할 수 있다. 세 가지 선택지를 검토했다.
 
 | 방식 | 장점 | 단점 | 채택 |
 |---|---|---|---|
@@ -867,22 +1027,23 @@ public TransactionResponse buy(Long assetId, Long currentUserId, BuyRequest requ
 | 비관적 락 (`SELECT FOR UPDATE`) | 확실함 | 충돌이 거의 없는데 매번 대기 비용 지불 | X |
 | **낙관적 락 (`@Version`)** | 도메인 메서드 유지, 저충돌 상황에 적합, 코드 1줄 | 충돌 시 재시도 필요 | **O** |
 
-이 서비스는 **개인 자산 관리**라 동일 Asset에 대한 동시 쓰기가 극히 드물다. 따라서 "충돌이 없다고 가정하고 진행하되, 충돌하면 감지해서 실패시키는" 낙관적 락이 비용 대비 가장 적합하다. 충돌 시 `409 CONCURRENT_MODIFICATION`으로 응답하고 클라이언트가 재시도한다.
+대기자금은 서비스 전체 공용이 아니라 사용자별·통화별 한 개다. 개인용 수동 입력 MVP에서는 동일 사용자가 같은 통화 거래를 동시에 보낼 가능성이 낮으므로 낙관적 락을 유지한다. 충돌 시 전체 거래를 롤백하고 `409 CONCURRENT_MODIFICATION`으로 응답한다.
 
-> 이 프로젝트의 핵심 설계 원칙("Asset의 상태 변경은 도메인 메서드를 통해서만")을 지키면서 정합성을 확보하려면 낙관적 락이 유일한 선택지다. 원자적 UPDATE는 더 빠르지만 평단가 계산 로직이 SQL 문자열로 새어나가 원칙과 충돌한다.
+> 낙관적 락은 유일한 선택지가 아니라 현재 규모에서 가장 작은 비용으로 도메인 메서드 캡슐화와 갱신 유실 방지를 함께 얻는 선택이다. 동시 쓰기가 실제로 늘면 멱등성 키를 전제로 한 제한적 재시도나 정해진 순서의 비관적 락을 다시 검토한다.
 
 ---
 
 ## 7. Roadmap
 
-### 7-1. Analytics (시계열 분석)
-- 자산 성장 그래프, Historical PNL, 월별 수익률, 최고 수익률 기록
-- **미룬 이유**: AssetSnapshot 테이블과 Scheduler/Batch 인프라가 필요하며, 6일 MVP에서는 "조회 경험 완성도"라는 핵심 가치 대비 비용이 크다.
-- **확장 시 구조**: `Asset → (매일 00시 Scheduler) → AssetSnapshot(asset_id, total_value, profit_loss, snapshot_date)`
+### 7-1. Analytics 고도화
+- **MVP에서 반영한 것**: 1D/7D/30D/90D 순자산 추이, 현재 자산 구성, 평가손익 순위
+- **남은 것**: 월별 수익률, 최고 수익률, 자산별 Daily 기여도, TWR/MWR
+- **확장 시 구조**: 현재 Portfolio Snapshot 차트는 실제 총액 추이로 유지하고, 입출금을 보정한 장기 성과는 별도
+  Return Series로 계산한다. 둘을 같은 차트나 같은 명칭으로 섞지 않는다.
 
 ### 7-2. 시세 API 고도화 (시세 자동 조회 자체는 MVP에 포함됨)
 - **유료/공식 API 전환** (TwelveData 등) — Yahoo Finance 비공식 API는 SLA가 없고 페이지 구조 변경 시 예고 없이 깨질 수 있음
-- **해외주식 환율 자동 조회** — 현재 해외주식(USD 등)의 exchangeRate는 수동 입력. (CRYPTO의 환율은 Upbit로 이미 자동화되어 MVP에 포함됨 — 별개 사안)
+- **FX 공식 API 전환** — 현재 USD/KRW는 Yahoo `KRW=X`, USDT/KRW는 Upbit public ticker를 사용한다.
 - **Scheduler 기반 사전 갱신** — 현재는 화면 진입 시점에 캐시(15분) 만료 여부를 확인해 그때 조회하는 방식. 사용자·자산 수가 늘어나면 배치로 미리 갱신해두는 방식으로 전환. 이때 조회 API가 상태를 변경하는 현재의 절충(GET이 safe하지 않음)도 함께 해소된다.
 - **Redis 캐시 전환** — 현재 전역 시세 캐시는 애플리케이션 메모리. 인스턴스가 2대 이상이 되면 인스턴스별로 캐시가 분리되어 외부 호출이 배수로 늘어난다. `PriceCache` 인터페이스 구현체만 교체.
 - **MVP에서 이미 반영한 것**: `PriceProvider` 인터페이스 추상화 + `PriceCache` 인터페이스 분리 + symbol 단위 전역 캐싱. STOCK은 `YahooFinancePriceProvider`, CRYPTO는 `CryptoPriceProvider`(Binance 가격 × Upbit 환율)를 구현체로 사용.
@@ -893,28 +1054,35 @@ public TransactionResponse buy(Long assetId, Long currentUserId, BuyRequest requ
 - **미룬 이유**: 인증/보안 요구사항이 크고, 프로젝트 목표(백엔드 아키텍처 경험)와 직접 관련이 적다.
 - **확장 시 구조**: `AssetSource = WEB3 / MYDATA`가 이미 Enum에 마련되어 있어 수집 로직만 추가하면 기존 Asset 구조 재사용 가능.
 
-### 7-4. 전체 거래 내역 화면
-- **미룬 이유**: "기록이 아니라 조회"라는 서비스 철학과 충돌. Dashboard 최근 5건 + 개별 Asset 거래 내역으로 충분.
+### 7-4. 전체 거래 내역 화면 — MVP 반영
+- 활성 자산의 Transaction API를 화면에서 합쳐 최신순으로 보여준다.
+- 전체/매수/매도/입금/출금 필터와 자산명·심볼·메모 검색을 제공한다.
+- Transaction이 독립 Aggregate가 아니라는 원칙을 유지하기 위해 전역 수정 API는 만들지 않고, 각 행을 Asset
+  상세 정정 흐름으로 연결한다.
 
 ### 7-5. 종목 단위 Allocation
 - **미룬 이유**: Dashboard 응답이 무거워짐. type 단위로 MVP 충분.
 - **확장 시 구조**: `GET /api/assets/allocation?groupBy=asset` 신설.
 
 ### 7-6. Asset 검색 자동완성
-- **미룬 이유**: 외부 심볼 API(7-2)에 의존. 한글 회사명("SK하이닉스") 검색이 Yahoo 비공식 검색 API에서 정확히 매칭되는지도 검증 안 됨. 현재는 직접 등록(종목코드/티커) + Dropdown 선택으로 표기 불일치 방지.
+- **MVP 반영**: KRX KIND의 KOSPI/KOSDAQ 상장법인목록을 UTF-8 정적 JSON으로 만들어 브라우저에서 로컬
+  검색한다. `SK`, `하이닉스`, `000660` 검색 결과를 선택하면 종목명·코드·시장·통화를 자동으로 채운다.
+- **외부 API를 타이핑마다 호출하지 않는 이유**: 입력 응답속도와 데모 안정성을 확보하고 공공 API 키를
+  클라이언트에 노출하지 않기 위해서다. `scripts/update-krx-securities.py`로 스냅샷을 갱신한다.
+- **남은 것**: 해외주식·암호화폐 자동완성, 초성 검색, 거래량/시가총액 기반 인기순 정렬.
 
 ### 7-7. 환차손익(FX PNL) 분리
 - 현재 PNL에는 주가 변동 손익과 환율 변동 손익이 섞여 있다(Glossary 참고).
-- **미룬 이유**: 원통화 기준 평단가를 별도로 관리해야 하고, 표시할 지표가 하나 더 늘어 MVP 화면이 복잡해진다.
-- **확장 시 구조**: `assets.avg_price_original` 컬럼 추가 → 매수 시 원통화 평단가도 함께 갱신 → `환차손익 = quantity × avgPriceOriginal × (현재환율 - 매수시점 가중평균환율)`
+- **현재 기반**: 사용자 표시를 위해 `avg_price_original`은 저장하지만 KRW 원가와 현재 KRW 평가액의 차이를 하나의 손익으로 보여준다.
+- **미룬 이유**: 환차손익 attribution은 별도 지표와 매수 시점 가중평균환율 설명이 필요해 MVP 화면을 복잡하게 만든다.
 
 ### 로드맵 우선순위
 1. 유료/공식 시세 API 전환 (TwelveData 등 — Yahoo Finance의 SLA 부재 리스크 해소)
-2. AssetSnapshot + Analytics (데이터 누적 후 의미 생김)
-3. 해외주식 환율 자동 조회
+2. 입출금 보정 장기 성과(TWR/MWR)와 월별 수익률
+3. FX 공식 API 전환
 4. Scheduler 기반 사전 갱신 + Redis 캐시 (트래픽 증가 시)
 5. 환차손익 분리
-6. Asset 검색 자동완성 (한글 매칭 검증 후)
+6. 해외주식·암호화폐 검색 자동완성
 7. WalletConnect
 8. MyData (가장 무거운 인증/보안 요구사항)
 

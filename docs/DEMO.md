@@ -47,10 +47,12 @@ bash scripts/seed-demo.sh
 ```
 ▸ 데모 계정 준비: demo@example.com / 1234abcd
 ▸ 자산 등록
-  BTC=1 ETH=2 NVDA=3 KB=4 CASH=5
+  BTC=1 ETH=2 ZEC=3 NVDA=4 USDT=5 USD=6 KB=7 CASH=8
 ▸ 거래 입력
-▸ 환율 입력 (해외주식의 환율은 MVP 에서 수동 입력이다 — Roadmap 7-2)
+▸ USD/KRW · USDT/KRW 자동 환율 확인
   ✓ NVDA 자동 조회 성공: 219.22000000 USD
+▸ Asset Analysis 발표용 90일 이력 준비 (local 전용)
+  ✓ 89 개 과거 Snapshot 생성 · 화면에 DEMO HISTORY로 표시
 ✅ 완료. http://localhost:8080 에서 demo@example.com / 1234abcd 로 로그인하세요.
 ```
 
@@ -60,9 +62,12 @@ bash scripts/seed-demo.sh
 |---|---|---|
 | 비트코인 (BTC) | CRYPTO | 0.5개 @40,000×1,380 매수 → 0.3개 @45,000×1,390 매수 → 0.2개 @56,000×1,385 **매도** |
 | 이더리움 (ETH) | CRYPTO | 4개 @2,400×1,385 매수 |
-| 엔비디아 (NVDA) | STOCK | 20개 @120×1,380 매수 + 환율 1,417 (시세는 Yahoo 자동 조회, 실패 시에만 219.22 수동 폴백) |
+| Zcash (ZEC) | CRYPTO | **Transaction 없이** 현재 보유 14.7개 + 선택 평단 370.40 USDT로 시작 |
+| 엔비디아 (NVDA) | STOCK | 20개 @120×1,380 매수 (시세와 USD/KRW 자동 조회, 실패 시 마지막 값 폴백) |
+| 테더 대기자금 | CASH | 자동 생성(0) → 60,000 외부 입금 후 BTC/ETH 매수대금 차감, BTC 매도대금 입금 |
+| 달러 대기자금 | CASH | 자동 생성(0) → 5,000 외부 입금 후 NVDA 매수대금 차감 |
 | KB국민은행 | BANK | 8,500,000 입금 → 450,000 출금 |
-| 현금 | CASH | 1,200,000 입금 |
+| 원화 대기자금 | CASH | 자동 생성(0) → 1,200,000 입금 |
 
 > **왜 SQL이 아니라 API 호출인가**: 평단가·실현손익이 실제 도메인 메서드를 통과해 계산되게 하기 위해서다. SQL로 값을 직접 꽂으면 화면에 숫자는 보이지만 그게 우리 로직에서 나온 값인지 알 수 없다. H2든 MySQL이든 같은 스크립트가 동작하는 것도 장점이다.
 >
@@ -74,24 +79,31 @@ bash scripts/seed-demo.sh
 
 ### 2-1. 로그인
 브라우저에서 **http://localhost:8080**
-- 이메일·비밀번호가 미리 채워져 있다 → **로그인** 클릭
+- `demo@example.com` / `1234abcd` 입력 → **로그인** 클릭
 
 > 설명 포인트: "JWT는 stateless라 로그아웃 API가 없다. 프론트가 토큰을 지우는 게 로그아웃이다."
 
 ### 2-2. Dashboard — 첫 화면
 보여줄 것:
-- **총 자산** (₩8천만 대)
-- **Investment Summary** — 평가손익과 실현손익이 **분리**되어 있다
-- **Asset Allocation** 도넛 차트 (CRYPTO / STOCK / BANK / CASH)
-- **보유 자산** — 평가손익 높은 순 정렬 (기본값)
-- **Cash & Bank**, **최근 거래 5건**
+- **총 투자자산**과 **오늘 손익**, 실제 Snapshot 기준 시각
+- **보유 Position** — 평가금액, 원통화 평단, 평가손익 순
+- **투자 대기자금** — KRW / USD / USDT 잔액과 KRW 환산액
+- **Asset Allocation**, 최근 거래, USD/KRW·USDT/KRW 시장 참고값
 
-> 설명 포인트:
-> - "실현손익 옆에 *(삭제 자산 포함)*이라 써둔 이유 → PRD의 빈틈을 찾은 이야기 (IMPLEMENTATION_NOTES §6-3)"
-> - "이 숫자는 전부 `/api/dashboard` 응답 하나다. Mock 없음."
+> 설명 포인트: "KRW/USD/USDT 대기자금은 첫 진입 때 0으로 자동 준비된다. 최초 Position은 과거 BUY를 만들지
+> 않고, 평단이 없으면 평가금액은 보여주되 손익은 `-`다."
 
 ### 2-3. 자산 행 클릭 → 거래 내역
 비트코인 행을 누르면 **거래 내역 드로어**가 열린다.
+
+매수·매도 버튼을 누르고 수량과 단가를 입력하면 저장 전에 다음 값이 실시간으로 보인다.
+
+- 거래 후 보유 수량
+- USDT/USD 정산 계좌의 거래 후 잔액
+- 매수 시 예상 평균 매수가 / 매도 시 예상 실현손익
+- 거래금액의 원화 환산액
+
+잔액이나 보유 수량이 부족하면 기록 버튼이 비활성화되고 부족한 양을 바로 설명한다.
 
 ```
 SELL  0.2   56,000 × 1,385   08/04 10:00 · 일부 익절
@@ -139,12 +151,37 @@ BUY   0.5   40,000 × 1,380   07/20 10:00 · 첫 매수
 ### 2-6. 탭 필터
 보유 자산 카드의 **[CRYPTO] / [STOCK]** 탭을 눌러 필터링을 보여준다.
 
-### 2-7. 새로고침 버튼 (↻)
+### 2-7. 전체 거래 내역
+최근 활동 카드의 **전체보기**를 누른다.
+
+- 매수·매도·입금·출금을 최신순으로 한 번에 확인
+- 유형 탭 필터
+- 자산명·심볼·메모 검색
+- 행 클릭 시 해당 Asset 상세 정정으로 연결
+
+### 2-8. 새로고침 버튼 (↻)
 우상단 ↻ 클릭 → "최신 시세로 갱신했습니다"
 
-> 설명 포인트: "여러 번 눌러도 15분 안에는 외부 API를 다시 부르지 않는다. 캐시는 자산이 아니라 **심볼**에 붙어 있다."
+> 설명 포인트: "일반 화면 조회는 같은 심볼의 15분 캐시를 재사용한다. 사용자가 ↻를 누른 경우에는 TTL을 무시하고 최신 시세와 환율을 요청하되, 같은 심볼의 동시 요청은 하나로 합쳐 중복 호출을 막는다. 자산 상세의 시세 새로고침은 선택한 자산만 갱신한다."
 
-### 2-8. FAB(+) — 도메인 규칙 보여주기
+### 2-9. Asset Analysis
+오늘 손익을 눌러 Asset Analysis로 이동한 뒤 **90D**를 선택한다.
+
+> `DEMO HISTORY`는 발표용 시드임을 숨기지 않고 명시한다. 실제 계정은 사용한 날부터 하루 한 점씩 실제
+> Snapshot이 쌓인다는 점을 함께 설명한다.
+
+### 2-10. 국내주식 종목명 검색
+
+우하단 **+** → **[자산 등록]** → 유형을 **주식**으로 바꾸고 검색창에 `SK` 또는 `하이닉스`를 입력한다.
+
+- KOSPI/KOSDAQ 종목명·6자리 코드·시장 목록이 즉시 표시된다.
+- `SK하이닉스`를 선택하면 `000660 / KOSPI / KRW / SK하이닉스`가 자동으로 채워진다.
+- 화면에는 `000660.KS`로 Yahoo 시세를 조회한다는 미리보기가 표시된다.
+
+> 설명 포인트: "타이핑마다 Yahoo나 공공 API를 호출하지 않습니다. KRX KIND 상장법인목록의 정적 스냅샷을
+> 로컬 검색하므로 빠르고 데모 중 외부 장애에도 목록이 열립니다. 저장할 때의 실제 시세 검증은 별도로 유지합니다."
+
+### 2-11. FAB(+) — 도메인 규칙 보여주기
 우하단 **+** → **[매수 · 매도]**
 - 자산: 비트코인 / 거래: **매도** / 수량: **99**
 - **기록** 클릭
@@ -187,7 +224,7 @@ bash scripts/verify.sh
   PASS   타인 자산에 거래 생성 (기대=404, 실제=404)
   PASS   토큰 없이 접근 (기대=401, 실제=401)
 ...
- PASS 26 / FAIL 0
+ PASS 49 / FAIL 0
 ```
 
 > 설명 포인트: "403이 아니라 **404**다. 403으로 응답하면 공격자가 id를 순회하며 어떤 자산이 실재하는지 목록을 만들 수 있다."
@@ -198,10 +235,14 @@ bash scripts/verify.sh
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"demo@example.com","password":"1234abcd"}' | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
 
+ASSETS=$(curl -s http://localhost:8080/api/assets -H "Authorization: Bearer $TOKEN")
+BTC_ID=$(printf '%s' "$ASSETS" | python3 -c 'import json,sys; print(next(a["id"] for a in json.load(sys.stdin) if a["symbol"] == "BTC"))')
+USDT_ID=$(printf '%s' "$ASSETS" | python3 -c 'import json,sys; print(next(a["id"] for a in json.load(sys.stdin) if a["type"] == "CASH" and a["symbol"] == "USDT"))')
+
 for i in $(seq 1 8); do
-  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/assets/1/transactions/buy \
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://localhost:8080/api/assets/$BTC_ID/transactions/buy" \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d '{"quantity":0.01,"price":50000,"exchangeRate":1400,"tradedAt":"2026-08-06T10:00:00"}' &
+    -d "{\"quantity\":0.01,\"price\":50000,\"exchangeRate\":1400,\"exchangeRateMode\":\"MANUAL\",\"settlementAssetId\":$USDT_ID,\"tradedAt\":\"2026-08-06T10:00:00\"}" &
 done | sort | uniq -c
 ```
 
@@ -265,7 +306,7 @@ EXPECT_STALE=1 bash scripts/verify.sh
 
 > 설명 포인트: "시세 조회 실패가 화면을 깨지 않는다. 그리고 **조용히 틀린 숫자를 보여주지도 않는다** — 오래된 값을 쓰고 있다는 사실을 사용자에게 알린다. 조용히 틀리는 게 가장 나쁜 실패 방식이다."
 >
-> 이 모드에서 시나리오 7(존재하지 않는 심볼 → 400)은 `SKIP`으로 표시된다. 외부가 죽으면 심볼 검증을 건너뛰고 등록을 허용하는 것이 PRD 4-2의 의도된 동작이라, 7번과 8번은 서로 배타적이기 때문이다. 두 모드 모두 `PASS 26 / FAIL 0`이다.
+> 이 모드에서 시나리오 7(존재하지 않는 심볼 → 400)은 `SKIP`으로 표시된다. 외부가 죽으면 심볼 검증을 건너뛰고 등록을 허용하는 것이 PRD 4-2의 의도된 동작이라, 7번과 8번은 서로 배타적이다. 기본 대기자금·환율 모드·수량 정정·오류 코드 검증을 포함한 정상 모드는 `PASS 49 / FAIL 0`이다.
 
 ### 5-4. 최후의 최후 — 네트워크가 아예 없을 때
 

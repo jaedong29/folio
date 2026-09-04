@@ -44,3 +44,5 @@ out/
 !.env.example
 # AWS deployment database backups
 /deploy/aws/backups/
+# scripts/export-code-to-markdown.sh 산출물 (생성 파일, 저장소에 추적하지 않음)
+docs/CODE_SNAPSHOT_*.md
