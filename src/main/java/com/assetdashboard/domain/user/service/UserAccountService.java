@@ -16,6 +16,8 @@ import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchJobRepository;
 import com.assetdashboard.evidence.trace.AgentEvaluationRecordRepository;
 import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
+import com.assetdashboard.global.audit.AuditAction;
+import com.assetdashboard.global.audit.AuditLogService;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
 import com.assetdashboard.global.security.RefreshTokenRepository;
@@ -44,6 +46,7 @@ public class UserAccountService {
   private final RefreshTokenRepository refreshTokenRepository;
   private final RefreshTokenService refreshTokenService;
   private final IdempotencyKeyRepository idempotencyKeyRepository;
+  private final AuditLogService auditLogService;
   private final PasswordEncoder passwordEncoder;
 
   /** 현재 비밀번호를 확인하고 새 비밀번호를 저장한다.
@@ -61,6 +64,7 @@ public class UserAccountService {
     user.changePassword(passwordEncoder.encode(request.newPassword()));
     // 비밀번호가 새어나갔을 가능성에 대비해 다른 기기의 세션도 모두 끊는다.
     refreshTokenService.revokeAllForUser(userId);
+    auditLogService.record(userId, AuditAction.PASSWORD_CHANGED);
   }
 
   /** 비밀번호와 확인 문구를 검증한 뒤 계정의 모든 데이터를 영구 삭제한다.
@@ -101,6 +105,8 @@ public class UserAccountService {
     }
     portfolioSnapshotRepository.deleteAllByUserId(userId);
     userRepository.delete(user);
+    // users FK를 두지 않아 탈퇴 트랜잭션이 커밋된 뒤에도 최소 감사 기록은 보존한다.
+    auditLogService.record(userId, AuditAction.ACCOUNT_DELETED);
   }
 
   private User getUser(Long userId) {

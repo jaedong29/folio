@@ -12,9 +12,9 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | LLM 비용 거버넌스 | Financial Evidence Agent와 News 요약이 하루 호출 수·토큰 사용량 카운터를 공유, 초과 시 `429 AI_BUDGET_EXCEEDED`로 실제 호출 전에 차단 | `evidence/agent/LlmUsageBudgetService.java`, `GET /api/ai/usage/today` |
 | 인증 세션 관리 | Access Token 30분 + 회전·폐기되는 Refresh Token(SHA-256 해시 저장), 재사용 탐지 시 세션 전체 폐기, 로그아웃·비밀번호 변경·회원 탈퇴가 실제로 세션을 끊음 | `global/security/RefreshTokenService.java` |
 | 비밀 관리 | API 키·JWT Secret은 환경변수로만 주입, 코드·설정 파일에 저장하지 않음. `prod` 프로필은 `APP_JWT_SECRET` 없으면 기동 자체가 실패 | `application.yml`, `JwtTokenProvider.java` |
-| 데이터 삭제 | 회원 탈퇴 시 자산·거래·Snapshot·근거 문서·Agent Trace·평가 배치·Refresh Token까지 연쇄 삭제, 고아 레코드 없음 | `UserAccountService.deleteAccount()` |
+| 데이터 삭제 | 회원 탈퇴 시 자산·거래·Snapshot·근거 문서·Agent Trace·평가 배치·Refresh Token까지 연쇄 삭제. 법적·운영 보존 정책이 필요한 내부 사용자 id·액션·시각의 최소 감사 기록만 별도 보존 | `UserAccountService.deleteAccount()` |
 | 인가 | 소유권 기반 404(리소스 존재 여부 비노출), `SecurityContext` 기반 `userId`만 신뢰, 신규 API는 기본적으로 인증 필요(명시적으로 연 경로만 예외) | `SecurityConfig.java` |
-| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V9`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
+| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V10`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
 | 백업 | AWS 스테이징용 백업·복구·검증 스크립트 존재(수동 실행) | `deploy/aws/backup.sh`, `restore.sh`, `verify-backup.sh` |
 | LLM 안전장치 | 숫자 조작·가격 인과·Prompt Injection·문장수·비정상 토큰을 규칙 기반으로 차단, 골든셋으로 회귀 검증 | `evidence/news/NewsAnswerGuardrail.java`, `news/NewsSummaryGuardrail.java` |
 | 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
@@ -22,6 +22,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | 거래 멱등성 키 | 매수·매도·입금·출금 4개 API가 `Idempotency-Key` 헤더를 필수로 받아, 네트워크 재시도·버튼 중복 클릭으로 같은 요청이 두 번 와도 한 번만 체결. DB unique 제약(`user_id`, `idempotency_key`)으로 동시 요청 경합도 막고, 같은 키에 다른 요청 본문이 오면 `409 IDEMPOTENCY_KEY_REUSED`로 거부. 24시간 뒤 자동 만료 | `domain/transaction/service/TransactionIdempotencyService.java`, `V9__idempotency_keys.sql` |
 | Refresh Token 정리 작업 | 만료된 지 7일 지난 Refresh Token 행을 매일 자동 삭제. 재사용 탐지(`rotate()`가 폐기 여부를 만료 여부보다 먼저 검사)에 잠시 쓰일 수 있어 만료 즉시가 아니라 유예 기간을 두고 지움 — 그전까지는 `refresh_tokens` 테이블이 무기한 쌓였음 | `global/security/RefreshTokenService.evictExpiredTokens()` |
 | Graceful shutdown | SIGTERM 수신 시 새 요청을 받지 않고 진행 중인 요청을 최대 30초까지 기다린 뒤 종료. Docker 종료 유예는 35초로 두어 애플리케이션보다 먼저 SIGKILL하지 않게 함 | `application.yml`, `docker-compose.yml`, `deploy/aws/docker-compose.yml` |
+| 민감 액션 감사 로그 | 비밀번호 변경·회원 탈퇴 성공을 내부 사용자 id·액션·시각만 별도 append-only 테이블에 기록. 업무 변경과 같은 트랜잭션에 참여해 실패한 변경을 성공으로 기록하지 않고, users FK를 두지 않아 탈퇴 후에도 보존 | `global/audit`, `V10__audit_logs.sql`, `UserAccountService.java` |
 
 ## 남은 갭
 
@@ -32,7 +33,6 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 - **로그인 잠금·IP 제한이 메모리 상태다.** `LoginAttemptGuard`/`AuthRateLimitFilter` 둘 다 `ConcurrentHashMap`에 상태를 둔다. 단일 인스턴스에서는 문제없지만 인스턴스를 늘리면 인스턴스마다 카운터가 따로 놀아 우회가 쉬워진다 — Redis 같은 공유 저장소로 옮겨야 한다. **지금은 단일 인스턴스 MVP라 별도 인프라 없이 바로 동작하는 쪽을 택했다.**
 - **회원가입·이메일 중복확인에는 이메일 단위 잠금이 없다.** IP 단위 전역 제한(`AuthRateLimitFilter`)은 걸리지만, 특정 이메일을 겨냥한 시도를 막는 장치는 로그인에만 있다.
 - **Secrets가 환경변수뿐이다.** AWS Secrets Manager, Vault 같은 별도 비밀 관리 시스템 연동이 없다. **단일 인스턴스 개인 배포 규모에서는 환경변수로 충분해서다.**
-- **감사 로그(audit log)가 없다.** 계정 삭제, 비밀번호 변경 같은 민감 액션이 애플리케이션 로그에만 남고 별도 감사 트레일로 분리돼 있지 않다.
 - **CORS 정책이 명시돼 있지 않다.** 지금은 정적 리소스와 API가 같은 origin에서 서빙되어 필요 없지만, 프런트엔드를 분리 배포하면 그때 반드시 설정해야 한다.
 
 ### 신뢰성 · 장애 대응
@@ -45,7 +45,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 - **분산 트레이싱이 없다.** Agent Trace는 자체 DB 테이블에만 남고, OpenTelemetry 같은 표준 트레이싱으로 내보내지 않는다. 외부 APM(Grafana, Datadog 등) 연동도 없다.
 - **구조화된 로깅이 아니다.** 기본 Spring Boot 로그 포맷을 그대로 쓴다. 로그 집계 시스템(예: ELK)에 붙이려면 JSON 로깅으로 바꿔야 한다.
-- **Trace·로그 보존 기간이 정해져 있지 않다.** Agent Trace, 평가 배치 기록이 무기한 쌓인다. 실제 운영 전 보존·삭제 정책이 필요하다.
+- **Trace·로그 보존 기간이 정해져 있지 않다.** Agent Trace, 평가 배치, 감사 로그가 무기한 쌓인다. 실제 운영 전 법적 요구와 탈퇴 정책에 맞춘 보존·삭제 기간이 필요하다.
 
 ### 데이터 · 컴플라이언스
 

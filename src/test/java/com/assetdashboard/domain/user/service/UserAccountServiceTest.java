@@ -1,12 +1,16 @@
 package com.assetdashboard.domain.user.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.assetdashboard.dashboard.snapshot.PortfolioSnapshotRepository;
 import com.assetdashboard.domain.asset.entity.Asset;
 import com.assetdashboard.domain.asset.repository.AssetRepository;
+import com.assetdashboard.domain.transaction.repository.IdempotencyKeyRepository;
 import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.domain.user.dto.ChangePasswordRequest;
 import com.assetdashboard.domain.user.dto.DeleteAccountRequest;
@@ -19,9 +23,10 @@ import com.assetdashboard.evidence.evaluation.LiveEvaluationBatchJobRepository;
 import com.assetdashboard.evidence.trace.AgentEvaluationRecordRepository;
 import com.assetdashboard.evidence.trace.AgentTraceRunRepository;
 import com.assetdashboard.evidence.trace.AgentTraceSpanRepository;
+import com.assetdashboard.global.audit.AuditAction;
+import com.assetdashboard.global.audit.AuditLogService;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
-import com.assetdashboard.domain.transaction.repository.IdempotencyKeyRepository;
 import com.assetdashboard.global.security.RefreshTokenRepository;
 import com.assetdashboard.global.security.RefreshTokenService;
 import java.util.List;
@@ -50,6 +55,7 @@ class UserAccountServiceTest {
   @Mock private RefreshTokenRepository refreshTokenRepository;
   @Mock private RefreshTokenService refreshTokenService;
   @Mock private IdempotencyKeyRepository idempotencyKeyRepository;
+  @Mock private AuditLogService auditLogService;
   @Mock private PasswordEncoder passwordEncoder;
   @Mock private Asset asset;
 
@@ -73,6 +79,7 @@ class UserAccountServiceTest {
             refreshTokenRepository,
             refreshTokenService,
             idempotencyKeyRepository,
+            auditLogService,
             passwordEncoder);
     user = User.create("user@example.com", "encoded-old", "user");
     when(userRepository.findById(7L)).thenReturn(java.util.Optional.of(user));
@@ -92,6 +99,20 @@ class UserAccountServiceTest {
             error ->
                 org.assertj.core.api.Assertions.assertThat(error.getErrorCode())
                     .isEqualTo(ErrorCode.INVALID_CREDENTIALS));
+
+    verify(auditLogService, never()).record(7L, AuditAction.PASSWORD_CHANGED);
+  }
+
+  @Test
+  void changePasswordRevokesSessionsAndRecordsTheAuditAction() {
+    when(passwordEncoder.encode("new-password")).thenReturn("encoded-new");
+
+    userAccountService.changePassword(
+        7L, new ChangePasswordRequest("old-password", "new-password"));
+
+    assertThat(user.getPassword()).isEqualTo("encoded-new");
+    verify(refreshTokenService).revokeAllForUser(7L);
+    verify(auditLogService).record(7L, AuditAction.PASSWORD_CHANGED);
   }
 
   @Test
@@ -127,6 +148,7 @@ class UserAccountServiceTest {
     deletionOrder.verify(assetRepository).deleteAllByIdInBatch(List.of(11L));
     deletionOrder.verify(portfolioSnapshotRepository).deleteAllByUserId(7L);
     deletionOrder.verify(userRepository).delete(user);
+    verify(auditLogService).record(7L, AuditAction.ACCOUNT_DELETED);
   }
 
   @Test
@@ -138,5 +160,7 @@ class UserAccountServiceTest {
             error ->
                 org.assertj.core.api.Assertions.assertThat(error.getErrorCode())
                     .isEqualTo(ErrorCode.INVALID_INPUT));
+
+    verify(auditLogService, never()).record(7L, AuditAction.ACCOUNT_DELETED);
   }
 }
