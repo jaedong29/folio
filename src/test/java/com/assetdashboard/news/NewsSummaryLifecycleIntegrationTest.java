@@ -43,6 +43,28 @@ class NewsSummaryLifecycleIntegrationTest {
     assertThat(reloaded.getSummaryOutputTokens()).isEqualTo(30);
   }
 
+  @Test
+  void persistsSafeFailureCodeAndMetricsWithoutRejectedText() {
+    NewsItem saved = repository.saveAndFlush(NewsItem.create(item()));
+    ClaimedNewsSummary claimed = lifecycleService.claimNext().orElseThrow();
+    NewsSummaryDraft rejected =
+        new NewsSummaryDraft("요약입니다.", "가격 상승 예상", "nemotron", 654, 140, 35);
+
+    boolean failed =
+        lifecycleService.fail(claimed, "SUMMARY_UNSAFE_CLAIM", rejected);
+
+    NewsItem reloaded = repository.findById(saved.getId()).orElseThrow();
+    assertThat(failed).isTrue();
+    assertThat(reloaded.getSummaryStatus()).isEqualTo(NewsSummaryStatus.FAILED);
+    assertThat(reloaded.getSummaryKo()).isNull();
+    assertThat(reloaded.getSignificanceKo()).isNull();
+    assertThat(reloaded.getSummaryErrorCode()).isEqualTo("SUMMARY_UNSAFE_CLAIM");
+    assertThat(reloaded.getSummaryModel()).isEqualTo("nemotron");
+    assertThat(reloaded.getSummaryLatencyMs()).isEqualTo(654);
+    assertThat(reloaded.getSummaryInputTokens()).isEqualTo(140);
+    assertThat(reloaded.getSummaryOutputTokens()).isEqualTo(35);
+  }
+
   private CollectedNewsItem item() {
     return new CollectedNewsItem(
         "SUMMARY_TEST_SOURCE",

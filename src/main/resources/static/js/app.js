@@ -813,9 +813,14 @@ function renderNewsFeed(feed) {
     const summaryLabel = !feed.summaryEnabled && !hasSummary
       ? '원문 표시'
       : summaryLabels[item.summaryStatus] || '원문 표시';
+    const usage = item.summaryLatencyMs == null
+      ? ''
+      : ` · ${Number(item.summaryLatencyMs).toLocaleString('ko-KR')}ms · ${Number(item.summaryInputTokens || 0).toLocaleString('ko-KR')} in / ${Number(item.summaryOutputTokens || 0).toLocaleString('ko-KR')} out`;
     const summaryTitle = hasSummary
-      ? `${item.summaryModel || 'model'} · ${item.summaryPromptVersion || 'prompt'}`
-      : '요약을 사용할 수 없어 공식 원문 일부를 표시합니다.';
+      ? `${item.summaryModel || 'model'} · ${item.summaryPromptVersion || 'prompt'}${usage}`
+      : item.summaryErrorCode
+        ? `AI 요약 실패: ${item.summaryErrorCode}${usage} · 공식 원문 일부를 표시합니다.`
+        : '요약을 사용할 수 없어 공식 원문 일부를 표시합니다.';
     const primaryText = hasSummary
       ? item.summaryKo
       : item.excerpt || '원문에서 세부 내용을 확인할 수 있습니다.';

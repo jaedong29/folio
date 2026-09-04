@@ -49,6 +49,34 @@ class NewsItemSummaryStateTest {
     assertThat(item.getSummaryKo()).isNull();
   }
 
+  @Test
+  void responseExposesOnlyOperationalMetadataForRejectedSummary() {
+    NewsItem item = NewsItem.create(item("hash-1", "first content"));
+    item.claimSummary();
+    NewsSummaryDraft rejected =
+        new NewsSummaryDraft("요약입니다.", "가격 상승 예상", "nemotron", 321, 120, 30);
+
+    assertThat(
+            item.failSummary(
+                "hash-1",
+                "SUMMARY_UNSAFE_CLAIM",
+                rejected,
+                "news-summary-v1",
+                Instant.parse("2026-09-05T00:00:00Z")))
+        .isTrue();
+
+    NewsItemResponse response = NewsItemResponse.from(item);
+    assertThat(response.summaryStatus()).isEqualTo(NewsSummaryStatus.FAILED);
+    assertThat(response.summaryKo()).isNull();
+    assertThat(response.significanceKo()).isNull();
+    assertThat(response.summaryErrorCode()).isEqualTo("SUMMARY_UNSAFE_CLAIM");
+    assertThat(response.summaryModel()).isEqualTo("nemotron");
+    assertThat(response.summaryPromptVersion()).isEqualTo("news-summary-v1");
+    assertThat(response.summaryLatencyMs()).isEqualTo(321);
+    assertThat(response.summaryInputTokens()).isEqualTo(120);
+    assertThat(response.summaryOutputTokens()).isEqualTo(30);
+  }
+
   private CollectedNewsItem item(String hash, String content) {
     return new CollectedNewsItem(
         "SOURCE",

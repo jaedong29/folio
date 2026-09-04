@@ -21,6 +21,10 @@ public record NewsItemResponse(
     String summaryModel,
     String summaryPromptVersion,
     Instant summaryUpdatedAt,
+    String summaryErrorCode,
+    Long summaryLatencyMs,
+    Long summaryInputTokens,
+    Long summaryOutputTokens,
     Set<String> symbols,
     Set<String> topics,
     boolean untrustedContent) {
@@ -43,6 +47,10 @@ public record NewsItemResponse(
         item.getSummaryModel(),
         item.getSummaryPromptVersion(),
         item.getSummaryUpdatedAt(),
+        item.getSummaryErrorCode(),
+        item.getSummaryLatencyMs(),
+        item.getSummaryInputTokens(),
+        item.getSummaryOutputTokens(),
         Set.copyOf(item.getSymbols()),
         Set.copyOf(item.getTopics()),
         true);

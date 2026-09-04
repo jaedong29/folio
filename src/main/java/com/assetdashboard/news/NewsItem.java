@@ -186,11 +186,27 @@ public class NewsItem extends BaseTimeEntity {
   }
 
   public boolean failSummary(String expectedContentHash, String errorCode, Instant failedAt) {
+    return failSummary(expectedContentHash, errorCode, null, null, failedAt);
+  }
+
+  public boolean failSummary(
+      String expectedContentHash,
+      String errorCode,
+      NewsSummaryDraft draft,
+      String promptVersion,
+      Instant failedAt) {
     if (summaryStatus != NewsSummaryStatus.RUNNING || !contentHash.equals(expectedContentHash)) {
       return false;
     }
     summaryStatus = NewsSummaryStatus.FAILED;
     summaryErrorCode = errorCode;
+    if (draft != null) {
+      summaryModel = draft.model();
+      summaryPromptVersion = promptVersion;
+      summaryLatencyMs = draft.latencyMs();
+      summaryInputTokens = draft.inputTokens();
+      summaryOutputTokens = draft.outputTokens();
+    }
     summaryUpdatedAt = failedAt;
     return true;
   }

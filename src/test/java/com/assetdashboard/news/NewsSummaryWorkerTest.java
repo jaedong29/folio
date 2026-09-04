@@ -59,7 +59,7 @@ class NewsSummaryWorkerTest {
 
     worker.processNext();
 
-    verify(lifecycleService).fail(claimed, "SUMMARY_UNSAFE_CLAIM");
+    verify(lifecycleService).fail(claimed, "SUMMARY_UNSAFE_CLAIM", draft);
     verify(lifecycleService, never()).complete(claimed, draft);
   }
 

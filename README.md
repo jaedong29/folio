@@ -228,7 +228,7 @@ read -s "NVIDIA_API_KEY?NVIDIA API Key: "; export NVIDIA_API_KEY; echo
 APP_AI_ENABLED=true ./gradlew bootRun
 ```
 
-공식자료 갱신 시 공용 한국어 요약도 함께 만들며, `APP_NEWS_SUMMARY_ENABLED=false`로 Agent와 별도로 요약 비용을 차단할 수 있다. 같은 `contentHash`의 자료는 다시 요약하지 않고, NIM 또는 Guardrail 실패 시 공식 원문 excerpt를 표시한다.
+공식자료 갱신 시 공용 한국어 요약도 함께 만들며, `APP_NEWS_SUMMARY_ENABLED=false`로 Agent와 별도로 요약 비용을 차단할 수 있다. 같은 `contentHash`의 자료는 다시 요약하지 않고, 길이 초과 응답은 완성 문장 기준으로 축약한 뒤 검증한다. NIM 또는 Guardrail 실패 시 공식 원문 excerpt를 표시하며 거부된 텍스트 대신 실패 코드·지연·토큰만 남긴다.
 
 API 키는 `application.yml`, `.env`, 명령행 인자나 Git에 저장하지 않는다. 실행 API는 `POST /api/ai/agent/assets/{assetId}/ask`이며 인증된 사용자의 경로 자산만 조회한다. 일반 화면에서는 투자자산을 눌러 상세 화면의 `AI 근거 분석`을 선택하면 답변, 근거 ID, 모델 실행 정보와 트리형 Trace를 확인할 수 있다.
 

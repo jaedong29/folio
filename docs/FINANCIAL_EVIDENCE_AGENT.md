@@ -115,7 +115,7 @@ NVIDIA NIM의 OpenAI 호환 Chat Completions를 사용하는 첫 단일 자산 A
 
 현재 실제 수집 Adapter는 `ZCASH_ZEBRA_GITHUB` 하나이며 Zcash Foundation의 Zebra GitHub Releases만 다룬다. `POST /api/news/refresh`는 작업을 큐에 넣고, 백그라운드 Worker가 수집한다. 동일 출처·외부 id는 upsert하고, 진행 중 작업과 6시간 안의 성공 작업을 재사용한다. 일반 언론기사, DART, SEC, X 수집은 아직 구현하지 않았다.
 
-새로운 `contentHash`는 별도 Summary Worker가 NIM으로 한국어 요약을 한 번 생성한다. 요약 상태, 모델, `news-summary-v1` 프롬프트 버전, 지연 시간과 토큰을 저장하며 같은 원문은 사용자 수와 무관하게 재사용한다. 가격·시세·매매 표현이나 원문에 없는 숫자를 포함한 출력은 저장하지 않고 원문 excerpt로 fallback한다. 완료 요약에도 공식 원문 일부와 링크를 함께 표시한다.
+새로운 `contentHash`는 별도 Summary Worker가 NIM으로 한국어 요약을 한 번 생성한다. 요약 상태, 모델, `news-summary-v1` 프롬프트 버전, 지연 시간과 토큰을 저장하며 같은 원문은 사용자 수와 무관하게 재사용한다. 모델이 길이 지시를 넘기면 마지막 완성 문장 경계에서 축약한 뒤 Guardrail을 적용한다. 가격·시세·매매 표현이나 원문에 없는 숫자를 포함한 출력은 저장하지 않고 원문 excerpt로 fallback하며, 이때 거부된 텍스트 대신 실패 코드와 호출 메타데이터만 보존한다. 완료 요약에도 공식 원문 일부와 링크를 함께 표시한다.
 
 Agent의 `searchSymbolNews` Tool은 등록 자산의 소유권을 확인한 뒤 이 공용 저장소에서 최신 5건을 조회한다. 제목·발행처·발표시각·원문 URL·검증 상태만 근거로 사용하며, 뉴스 존재와 가격 움직임 사이의 인과관계는 만들지 않는다.
 

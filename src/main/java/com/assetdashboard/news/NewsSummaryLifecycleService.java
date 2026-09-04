@@ -48,9 +48,22 @@ public class NewsSummaryLifecycleService {
 
   @Transactional
   public boolean fail(ClaimedNewsSummary claimed, String errorCode) {
+    return fail(claimed, errorCode, null);
+  }
+
+  @Transactional
+  public boolean fail(
+      ClaimedNewsSummary claimed, String errorCode, NewsSummaryDraft rejectedDraft) {
     return repository
         .findById(claimed.newsItemId())
-        .map(item -> item.failSummary(claimed.contentHash(), errorCode, Instant.now(clock)))
+        .map(
+            item ->
+                item.failSummary(
+                    claimed.contentHash(),
+                    errorCode,
+                    rejectedDraft,
+                    rejectedDraft == null ? null : PROMPT_VERSION,
+                    Instant.now(clock)))
         .orElse(false);
   }
 

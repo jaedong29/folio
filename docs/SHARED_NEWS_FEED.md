@@ -23,7 +23,9 @@ POST /api/news/refresh
 - API 응답에는 전문 대신 짧은 excerpt와 원문 URL을 노출한다.
 - 외부 내용은 검증된 공식 출처여도 LLM 명령이 아닌 `untrustedContent`로 취급한다.
 - 요약은 `PENDING/RUNNING/COMPLETED/FAILED` 상태와 모델·프롬프트 버전·지연·토큰을 함께 저장한다.
+- 모델에는 `summaryKo` 350자, `significanceKo` 180자 이하를 요구하며 초과 응답은 마지막 완성 문장 경계에서 축약한 뒤 Guardrail을 적용한다.
 - 요약에 가격 전망·투자 권유·원문에 없는 숫자가 있으면 저장하지 않고 원문 excerpt로 돌아간다.
+- 차단된 요약 원문은 저장하지 않지만 안전한 실패 코드와 모델·프롬프트 버전·지연·토큰은 API에 노출해 운영 원인을 확인할 수 있다.
 - 완료된 요약도 공식 원문 일부와 원문 링크를 함께 보여준다.
 - 사용자나 자산을 삭제해도 공용 뉴스는 유지한다. `PORTFOLIO` 조회에서 활성 자산 symbol이 사라질 뿐이다.
 

@@ -39,7 +39,7 @@ public class NewsSummaryWorker {
       NewsSummaryDraft draft = modelClient.summarize(claimed);
       Optional<String> violation = guardrail.validate(claimed, draft);
       if (violation.isPresent()) {
-        lifecycleService.fail(claimed, violation.get());
+        lifecycleService.fail(claimed, violation.get(), draft);
         log.warn("[NewsSummary] blocked newsItemId={} code={}", claimed.newsItemId(), violation.get());
         return;
       }

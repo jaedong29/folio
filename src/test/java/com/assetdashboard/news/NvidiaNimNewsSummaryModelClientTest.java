@@ -18,6 +18,40 @@ import org.springframework.web.client.RestClient;
 class NvidiaNimNewsSummaryModelClientTest {
 
   @Test
+  void limitsOverlongModelTextAtTheLastCompleteSentence() {
+    String firstSummarySentence = "가".repeat(220) + ".";
+    String secondSummarySentence = "나".repeat(180) + ".";
+    String firstSignificanceSentence = "다".repeat(100) + ".";
+    String secondSignificanceSentence = "라".repeat(100) + ".";
+
+    assertThat(
+            NvidiaNimNewsSummaryModelClient.limitAtSentenceBoundary(
+                firstSummarySentence + " " + secondSummarySentence, 350))
+        .isEqualTo(firstSummarySentence);
+    assertThat(
+            NvidiaNimNewsSummaryModelClient.limitAtSentenceBoundary(
+                firstSignificanceSentence + " " + secondSignificanceSentence, 180))
+        .isEqualTo(firstSignificanceSentence);
+  }
+
+  @Test
+  void usesEllipsisWhenThereIsNoUsefulSentenceBoundary() {
+    String result =
+        NvidiaNimNewsSummaryModelClient.limitAtSentenceBoundary("가".repeat(400), 350);
+
+    assertThat(result).hasSizeLessThanOrEqualTo(350).endsWith("…");
+  }
+
+  @Test
+  void doesNotTreatVersionDecimalPointAsSentenceBoundary() {
+    String overlong = "가".repeat(340) + " 6.3 버전의 변경 내용";
+
+    String result = NvidiaNimNewsSummaryModelClient.limitAtSentenceBoundary(overlong, 350);
+
+    assertThat(result).hasSizeLessThanOrEqualTo(350).endsWith("…");
+  }
+
+  @Test
   void requestsOneNonStreamingJsonSummaryWithoutTools() {
     RestClient.Builder builder = RestClient.builder().baseUrl("https://nim.test/v1");
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
