@@ -3,147 +3,520 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0d12" />
   <title>Asset Dashboard</title>
-  <link rel="stylesheet" href="/css/app.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+  <link rel="stylesheet" href="/css/app.css?v=20260903-2" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='26' fill='%235b8cff'/><path d='M27 66V46h12v20zm18 0V27h12v39zm18 0V37h12v29z' fill='white'/></svg>" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
-<!-- ── 로그인 ─────────────────────────────────────── -->
+<!-- 로그인 -->
 <section id="login-view" class="login-wrap">
+  <div class="login-orb login-orb-one"></div>
+  <div class="login-orb login-orb-two"></div>
   <div class="login-card">
-    <h1 class="brand">Asset<span>Dashboard</span></h1>
-    <p class="brand-sub">흩어진 자산을 한 화면에서</p>
+    <div class="brand-lockup login-brand">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>folio<span class="brand-dot">.</span></span>
+    </div>
+    <p class="brand-sub">흩어진 자산을 하나의 시야로</p>
+
+    <div class="auth-tabs" role="tablist" aria-label="인증 방식">
+      <button id="auth-login-tab" class="auth-tab active" type="button" role="tab" aria-selected="true">로그인</button>
+      <button id="auth-signup-tab" class="auth-tab" type="button" role="tab" aria-selected="false">회원가입</button>
+    </div>
 
     <form id="login-form" autocomplete="on">
-      <label>이메일<input type="email" id="login-email" value="demo@example.com" required /></label>
-      <label>비밀번호<input type="password" id="login-password" value="1234abcd" required /></label>
-      <button type="submit" class="btn-primary">로그인</button>
-      <button type="button" id="signup-btn" class="btn-ghost">이 정보로 회원가입</button>
+      <div class="auth-form-title">
+        <strong>다시 오셨군요</strong>
+        <span>등록한 이메일로 Portfolio를 이어서 확인하세요.</span>
+      </div>
+      <label>이메일<input type="email" id="login-email" autocomplete="email" placeholder="name@example.com" required /></label>
+      <label>비밀번호<input type="password" id="login-password" autocomplete="current-password" placeholder="비밀번호를 입력해주세요" required /></label>
+      <button type="submit" class="btn-primary">대시보드 시작하기</button>
+      <button type="button" id="open-signup-btn" class="btn-ghost">처음이신가요? 회원가입</button>
+      <p id="login-error" class="error" aria-live="polite"></p>
     </form>
-    <p id="login-error" class="error"></p>
+
+    <form id="signup-form" autocomplete="on" hidden>
+      <div class="auth-form-title">
+        <strong>나만의 Folio 만들기</strong>
+        <span>실제 자산 연결 없이 직접 기록하는 개인 대시보드입니다.</span>
+      </div>
+      <label>이메일
+        <span class="auth-inline-field">
+          <input type="email" id="signup-email" autocomplete="email" placeholder="name@example.com" required />
+          <button type="button" id="check-email-btn" class="auth-check-button">중복확인</button>
+        </span>
+        <small id="signup-email-status" class="auth-field-status">로그인에 사용할 이메일을 입력해주세요.</small>
+      </label>
+      <label>닉네임
+        <input type="text" id="signup-nickname" autocomplete="nickname" maxlength="50" placeholder="대시보드에 표시할 이름" required />
+      </label>
+      <label>비밀번호
+        <input type="password" id="signup-password" autocomplete="new-password" minlength="8" placeholder="8자 이상 입력해주세요" required />
+        <small id="signup-password-status" class="auth-field-status">8자 이상이면 사용할 수 있습니다.</small>
+      </label>
+      <label>비밀번호 확인
+        <input type="password" id="signup-password-confirm" autocomplete="new-password" minlength="8" placeholder="비밀번호를 다시 입력해주세요" required />
+        <small id="signup-confirm-status" class="auth-field-status">같은 비밀번호를 한 번 더 입력해주세요.</small>
+      </label>
+      <button type="submit" id="signup-submit" class="btn-primary" disabled>회원가입 완료하기</button>
+      <button type="button" id="open-login-btn" class="btn-ghost">이미 계정이 있어요</button>
+      <p id="signup-error" class="error" aria-live="polite"></p>
+    </form>
   </div>
 </section>
 
-<!-- ── 대시보드 ───────────────────────────────────── -->
+<!-- 대시보드 -->
 <section id="app-view" hidden>
   <header class="topbar">
-    <div class="topbar-left">
-      <span class="logo">📊</span>
-      <strong>Asset Dashboard</strong>
-    </div>
-    <div class="topbar-right">
-      <span id="user-nickname" class="nickname"></span>
-      <button id="refresh-btn" class="btn-icon" title="새로고침">↻</button>
-      <button id="logout-btn" class="btn-ghost sm">로그아웃</button>
+    <div class="topbar-shell">
+      <div class="topbar-left">
+        <button id="brand-home" class="brand-lockup brand-home" type="button" aria-label="자산 현황 대시보드로 이동" title="자산 현황으로 이동">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>folio<span class="brand-dot">.</span></span>
+        </button>
+        <span class="nav-divider"></span>
+        <nav class="topbar-nav" aria-label="주요 화면">
+          <button id="nav-overview" class="topbar-nav-link active" type="button">Overview</button>
+          <button id="nav-news" class="topbar-nav-link" type="button">News</button>
+        </nav>
+        <span id="nav-current" class="sr-only">Overview</span>
+      </div>
+      <div class="topbar-right">
+        <span id="last-refresh-label" class="sync-label">동기화 준비 중</span>
+        <button id="refresh-btn" class="btn-icon refresh-button" title="최신 시세로 갱신" aria-label="최신 시세로 갱신">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M18.2 9A7 7 0 0 0 6.5 6.5L4 9m16 6-2.5 2.5A7 7 0 0 1 5.8 15"/></svg>
+        </button>
+        <div class="user-chip">
+          <span id="user-avatar" class="user-avatar">U</span>
+          <span id="user-nickname" class="nickname"></span>
+        </div>
+        <button id="account-btn" class="btn-ghost sm account-button" type="button">계정</button>
+        <button id="logout-btn" class="btn-ghost sm logout-button">로그아웃</button>
+      </div>
     </div>
   </header>
 
   <main class="container">
+    <section id="overview-page">
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow">MY PORTFOLIO</p>
+        <h1>자산 현황</h1>
+        <p id="page-date" class="page-date"></p>
+      </div>
+      <button id="fab" class="add-action" title="자산 등록 / 거래 입력">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>추가하기</span>
+      </button>
+    </div>
 
     <!-- 빈 상태 -->
     <div id="empty-state" class="empty" hidden>
-      <div class="empty-emoji">🪙</div>
-      <h2>아직 등록된 자산이 없어요</h2>
-      <p>아래 + 버튼을 눌러 첫 자산을 등록해보세요</p>
+      <div class="empty-visual" aria-hidden="true"><span></span><span></span><span></span></div>
+      <h2>첫 자산을 추가해보세요</h2>
+      <p>주식, 암호화폐, 현금을 한 화면에서 확인할 수 있습니다.</p>
+      <button id="empty-add-btn" class="add-action empty-add-action" type="button">첫 자산 추가하기</button>
     </div>
 
     <div id="dashboard-body" hidden>
-      <!-- 총 자산 -->
-      <section class="card hero">
-        <div class="hero-label">총 자산</div>
-        <div class="hero-value" id="total-asset">₩0</div>
-        <div class="hero-meta">
-          <span id="stale-badge" class="badge badge-warn" hidden>⚠ 일부 시세가 오래됨</span>
+      <!-- 순자산 요약 -->
+      <section class="overview-card">
+        <div class="overview-primary">
+          <div class="hero-label-row">
+            <span class="hero-label">TOTAL NET WORTH</span>
+            <button id="privacy-toggle" class="privacy-toggle" type="button" aria-pressed="false" aria-label="개인 자산 금액 숨기기" title="개인 자산 금액 숨기기">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+            </button>
+            <span class="live-status"><i></i> Live portfolio</span>
+          </div>
+          <div class="hero-value" id="total-asset">₩0</div>
+          <button id="open-analysis" class="hero-daily" type="button" aria-label="오늘 손익 상세 분석 보기">
+            <span>오늘</span>
+            <strong id="daily-pnl">-</strong>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <small id="daily-baseline" class="daily-baseline">기준을 준비하고 있습니다</small>
+          <div class="hero-meta">
+            <span id="stale-badge" class="badge badge-warn" hidden>일부 시세가 오래되었습니다</span>
+            <span id="exchange-rate-badge" class="badge badge-warn" hidden>현재 환율 입력이 필요합니다</span>
+          </div>
+        </div>
+        <div class="overview-summary">
+          <div class="summary-item">
+            <span>투자자산</span>
+            <strong id="investment-total">-</strong>
+            <small>주식 · 암호화폐</small>
+          </div>
+          <div class="summary-item">
+            <span>Cash & Bank</span>
+            <strong id="cash-total">-</strong>
+            <small>투자 대기자금</small>
+          </div>
+          <div class="summary-item">
+            <span>평가손익</span>
+            <strong id="unrealized-total">-</strong>
+            <small id="unrealized-rate">미실현</small>
+          </div>
+          <div class="summary-item">
+            <span>실현손익</span>
+            <strong id="realized-total">-</strong>
+            <small>누적 확정 손익</small>
+          </div>
         </div>
       </section>
 
-      <div class="grid-2">
-        <!-- Investment Summary -->
-        <section class="card">
-          <h2 class="card-title">Investment Summary</h2>
-          <div class="stat-row">
-            <span>평가금액</span><strong id="inv-valuation">-</strong>
-          </div>
-          <div class="stat-row">
-            <span>매입금액</span><strong id="inv-cost">-</strong>
-          </div>
-          <div class="stat-row divider">
-            <span>평가손익</span>
-            <strong id="inv-unrealized">-</strong>
-          </div>
-          <div class="stat-row">
-            <span>실현손익 <em class="hint">(삭제 자산 포함)</em></span>
-            <strong id="inv-realized">-</strong>
-          </div>
-        </section>
+      <div class="dashboard-grid">
+        <div class="main-column">
+          <!-- 보유 자산 -->
+          <section class="card holdings-card">
+            <div class="card-head holdings-head">
+              <div>
+                <div class="title-line">
+                  <h2 class="card-title">보유 자산</h2>
+                  <span id="portfolio-count" class="count-badge">0</span>
+                </div>
+                <p class="card-subtitle">현재 포지션과 평가손익</p>
+              </div>
+              <div class="tabs" id="portfolio-tabs">
+                <button class="tab active" data-type="">전체</button>
+                <button class="tab" data-type="CRYPTO">코인</button>
+                <button class="tab" data-type="STOCK">주식</button>
+              </div>
+            </div>
+            <div class="asset-table-head" aria-hidden="true">
+              <span>자산</span><span>현재가 · 보유량</span><span>평가금액</span>
+            </div>
+            <div id="portfolio-list" class="list portfolio-list"></div>
+          </section>
+        </div>
 
-        <!-- Allocation -->
-        <section class="card">
-          <h2 class="card-title">Asset Allocation</h2>
-          <div class="chart-wrap"><canvas id="allocation-chart"></canvas></div>
-          <ul class="legend" id="allocation-legend"></ul>
-        </section>
+        <aside class="side-column">
+          <!-- Cash & Bank -->
+          <section class="card cash-card">
+            <div class="card-head compact-head">
+              <div>
+                <h2 class="card-title">Cash &amp; Bank</h2>
+                <p class="card-subtitle">통화별 투자 대기자금</p>
+              </div>
+              <span class="section-icon wallet-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 7.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2h12v3M15 13.5h5"/></svg>
+              </span>
+            </div>
+            <div id="cash-list" class="currency-list"></div>
+          </section>
+
+          <!-- 시장 참고 환율 -->
+          <section class="card market-rate-card">
+            <div class="card-head compact-head">
+              <div>
+                <h2 class="card-title">Today's rates</h2>
+                <p class="card-subtitle">원화 환산 기준</p>
+              </div>
+              <span class="rate-live"><i></i> LIVE</span>
+            </div>
+            <div class="market-rate-grid">
+              <div class="market-rate-item">
+                <span class="currency-icon currency-usd">$</span>
+                <div class="market-rate-copy">
+                  <div class="market-rate-label">USD <span>/ KRW</span></div>
+                  <strong id="usd-krw-rate">-</strong>
+                  <small id="usd-krw-source">조회 이력 없음</small>
+                </div>
+              </div>
+              <div class="market-rate-item">
+                <span class="currency-icon currency-usdt">₮</span>
+                <div class="market-rate-copy">
+                  <div class="market-rate-label">USDT <span>/ KRW</span></div>
+                  <strong id="usdt-krw-rate">-</strong>
+                  <small id="usdt-krw-source">조회 이력 없음</small>
+                </div>
+              </div>
+            </div>
+            <p class="rate-footnote">15분 캐시 · 조회 실패 시 마지막 값 사용</p>
+          </section>
+        </aside>
       </div>
 
-      <!-- 보유 자산 -->
-      <section class="card">
-        <div class="card-head">
-          <h2 class="card-title">보유 자산</h2>
-          <div class="tabs" id="portfolio-tabs">
-            <button class="tab active" data-type="">전체</button>
-            <button class="tab" data-type="CRYPTO">CRYPTO</button>
-            <button class="tab" data-type="STOCK">STOCK</button>
+      <div class="insight-grid">
+        <!-- Allocation -->
+        <section class="card allocation-card">
+          <div class="card-head compact-head">
+            <div>
+              <h2 class="card-title">자산 배분</h2>
+              <p class="card-subtitle">유형별 포트폴리오 비중</p>
+            </div>
           </div>
-        </div>
-        <div id="portfolio-list" class="list"></div>
-      </section>
-
-      <div class="grid-2">
-        <!-- Cash & Bank -->
-        <section class="card">
-          <h2 class="card-title">Cash &amp; Bank</h2>
-          <div id="cash-list" class="list"></div>
+          <div class="allocation-content">
+            <div class="chart-wrap">
+              <canvas id="allocation-chart"></canvas>
+              <div class="chart-center"><span>Assets</span><strong id="allocation-count">0</strong></div>
+            </div>
+            <ul class="legend" id="allocation-legend"></ul>
+          </div>
         </section>
 
         <!-- 최근 거래 -->
-        <section class="card">
-          <h2 class="card-title">최근 거래</h2>
-          <div id="recent-list" class="list"></div>
+        <section class="card activity-card">
+          <div class="card-head compact-head">
+            <div>
+              <h2 class="card-title">최근 활동</h2>
+              <p class="card-subtitle">가장 최근 기록된 거래</p>
+            </div>
+            <button id="open-activity" class="section-link" type="button">
+              전체보기
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+          <div id="recent-list" class="list activity-list"></div>
         </section>
       </div>
     </div>
-  </main>
+    </section>
 
-  <button id="fab" class="fab" title="자산 등록 / 거래 입력">+</button>
+    <!-- Asset Analysis -->
+    <section id="analysis-page" class="analysis-page" hidden>
+      <div class="analysis-header">
+        <button id="analysis-back" class="analysis-back" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          <span>Overview</span>
+        </button>
+        <div class="analysis-title-row">
+          <div>
+            <p class="eyebrow">PORTFOLIO REPORT</p>
+            <h1>Asset Analysis</h1>
+            <p class="page-date">현재 보유자산과 Snapshot으로 보는 자산 리포트</p>
+          </div>
+          <span class="analysis-live"><i></i> Latest portfolio</span>
+        </div>
+      </div>
+
+      <div class="analysis-kpi-grid">
+        <article class="analysis-kpi analysis-kpi-primary">
+          <span>오늘 손익</span>
+          <strong id="analysis-daily-pnl">-</strong>
+          <small id="analysis-daily-caption">외부 입출금 반영</small>
+        </article>
+        <article class="analysis-kpi">
+          <span>현재 총자산</span>
+          <strong id="analysis-current-total">-</strong>
+          <small>KRW 환산 가치</small>
+        </article>
+        <article class="analysis-kpi">
+          <span>평가손익</span>
+          <strong id="analysis-unrealized-pnl">-</strong>
+          <small id="analysis-unrealized-rate">미실현 손익</small>
+        </article>
+        <article class="analysis-kpi">
+          <span>실현손익</span>
+          <strong id="analysis-realized-pnl">-</strong>
+          <small>누적 확정 손익</small>
+        </article>
+      </div>
+
+      <section class="card analysis-chart-card">
+        <div class="card-head analysis-chart-head">
+          <div>
+            <h2 class="card-title">순자산 추이</h2>
+            <p class="card-subtitle">Portfolio Snapshot과 현재 총자산</p>
+          </div>
+          <div class="analysis-chart-tools">
+            <div class="period-change">
+              <span>기간 자산 증감</span>
+              <strong id="analysis-period-change">-</strong>
+            </div>
+            <div class="tabs" id="analysis-period-tabs">
+              <button class="tab active" data-days="1">오늘</button>
+              <button class="tab" data-days="7">7D</button>
+              <button class="tab" data-days="30">30D</button>
+              <button class="tab" data-days="90">90D</button>
+            </div>
+          </div>
+        </div>
+        <div class="analysis-chart-wrap">
+          <canvas id="analysis-value-chart"></canvas>
+          <div id="analysis-chart-empty" class="analysis-chart-empty" hidden>
+            <strong>Snapshot을 준비하고 있습니다</strong>
+            <span>대시보드를 사용하면 매일 기준값이 하나씩 쌓입니다.</span>
+          </div>
+        </div>
+        <div class="analysis-chart-footer">
+          <span><span id="analysis-demo-badge" class="demo-badge" hidden>DEMO HISTORY</span><span id="analysis-history-status">불러오는 중…</span></span>
+          <span>순자산 추이는 입출금을 포함하며, 투자 수익률과는 다릅니다.</span>
+        </div>
+      </section>
+
+      <div class="analysis-bottom-grid">
+        <section class="card analysis-composition-card">
+          <div class="card-head compact-head">
+            <div>
+              <h2 class="card-title">Portfolio composition</h2>
+              <p class="card-subtitle">현재 자산별 평가금액 비중</p>
+            </div>
+          </div>
+          <div id="analysis-composition" class="analysis-composition"></div>
+        </section>
+
+        <section class="card analysis-ranking-card">
+          <div class="card-head compact-head">
+            <div>
+              <h2 class="card-title">평가손익 순위</h2>
+              <p class="card-subtitle">현재 보유 Position 기준</p>
+            </div>
+          </div>
+          <div id="analysis-ranking" class="analysis-ranking"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- 전체 거래 내역 -->
+    <section id="activity-page" class="activity-page" hidden>
+      <div class="analysis-header">
+        <button id="activity-back" class="analysis-back" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          <span>Overview</span>
+        </button>
+        <div class="analysis-title-row">
+          <div>
+            <p class="eyebrow">ACTIVITY LEDGER</p>
+            <h1>전체 거래 내역</h1>
+            <p class="page-date">매수·매도와 입출금을 한곳에서 확인하고 정정합니다</p>
+          </div>
+          <span class="analysis-live"><i></i> Synced records</span>
+        </div>
+      </div>
+
+      <div class="activity-kpi-grid">
+        <article class="analysis-kpi activity-kpi-primary">
+          <span>전체 기록</span>
+          <strong id="activity-total-count">0건</strong>
+          <small>현재 활성 자산 기준</small>
+        </article>
+        <article class="analysis-kpi">
+          <span>거래한 자산</span>
+          <strong id="activity-asset-count">0개</strong>
+          <small>투자·현금·은행 포함</small>
+        </article>
+        <article class="analysis-kpi">
+          <span>최근 기록</span>
+          <strong id="activity-last-date">-</strong>
+          <small>사용자가 입력한 거래 시점</small>
+        </article>
+      </div>
+
+      <section class="card activity-ledger-card">
+        <div class="activity-toolbar">
+          <div class="tabs activity-filter-tabs" id="activity-filter-tabs" aria-label="거래 유형 필터">
+            <button class="tab active" data-filter="">전체</button>
+            <button class="tab" data-filter="BUY">매수</button>
+            <button class="tab" data-filter="SELL">매도</button>
+            <button class="tab" data-filter="DEPOSIT">입금</button>
+            <button class="tab" data-filter="WITHDRAW">출금</button>
+          </div>
+          <label class="activity-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="activity-search" type="search" placeholder="자산명, 심볼, 메모 검색" aria-label="거래 내역 검색" />
+          </label>
+        </div>
+        <div class="ledger-head" aria-hidden="true">
+          <span>거래</span><span>거래 시점</span><span>수량·단가</span><span>정산</span>
+        </div>
+        <div id="activity-history-list" class="activity-history-list">
+          <div class="empty-row">거래 내역을 불러오는 중…</div>
+        </div>
+        <p class="ledger-footnote">항목을 누르면 자산 상세에서 잘못 입력한 거래를 삭제하고 계산을 다시 맞출 수 있습니다.</p>
+      </section>
+    </section>
+
+    <!-- 공용 금융 뉴스 허브 -->
+    <section id="news-page" class="news-page" hidden>
+      <div class="news-hero">
+        <div>
+          <p class="eyebrow">MARKET EVIDENCE FEED</p>
+          <h1>News</h1>
+          <p class="page-date">공식자료와 금융 뉴스를 공용으로 수집하고 내 자산과 연결합니다</p>
+        </div>
+        <button id="news-refresh-btn" class="news-refresh-action" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M18.2 9A7 7 0 0 0 6.5 6.5L4 9m16 6-2.5 2.5A7 7 0 0 1 5.8 15"/></svg>
+          <span>공식자료 갱신</span>
+        </button>
+      </div>
+
+      <section class="news-status-card">
+        <div class="news-status-icon" aria-hidden="true">N</div>
+        <div class="news-status-copy">
+          <strong id="news-source-name">공식 출처를 확인하는 중…</strong>
+          <span id="news-source-status">저장된 자료를 먼저 표시합니다.</span>
+        </div>
+        <div class="news-status-metrics">
+          <span>현재 피드</span>
+          <strong id="news-result-count">0건</strong>
+        </div>
+      </section>
+
+      <section class="card news-feed-card">
+        <div class="news-toolbar">
+          <div class="tabs news-scope-tabs" id="news-scope-tabs" aria-label="뉴스 범위">
+            <button class="tab active" data-scope="ALL">전체 시장</button>
+            <button class="tab" data-scope="PORTFOLIO">내 자산 관련</button>
+          </div>
+          <form id="news-search-form" class="activity-search news-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="news-search" type="search" placeholder="제목·발행처 검색" aria-label="뉴스 검색" />
+          </form>
+        </div>
+        <div class="news-category-tabs" id="news-category-tabs" aria-label="뉴스 카테고리">
+          <button class="news-category active" data-category="">전체</button>
+          <button class="news-category" data-category="CRYPTO">Crypto</button>
+          <button class="news-category" data-category="COMPANY">Companies</button>
+          <button class="news-category" data-category="MACRO">Macro</button>
+          <button class="news-category" data-category="FX">FX</button>
+          <button class="news-category" data-category="GEOPOLITICS">Geopolitics</button>
+        </div>
+        <div class="news-disclosure">
+          <span>READ-ONLY</span>
+          공식 출처의 내용도 AI 명령이 아닌 인용 데이터로 취급하며, 원문 링크와 발표 시각을 함께 표시합니다.
+        </div>
+        <div id="news-feed-list" class="news-feed-list">
+          <div class="empty-row">뉴스 피드를 불러오는 중…</div>
+        </div>
+      </section>
+    </section>
+  </main>
 </section>
 
-<!-- ── 모달 ───────────────────────────────────────── -->
+<!-- 모달 -->
 <div id="modal-backdrop" class="modal-backdrop" hidden>
-  <div class="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-head">
       <h3 id="modal-title">무엇을 하시겠어요?</h3>
-      <button id="modal-close" class="btn-icon">✕</button>
+      <button id="modal-close" class="btn-icon" aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
     </div>
     <div id="modal-body"></div>
     <p id="modal-error" class="error"></p>
   </div>
 </div>
 
-<!-- 거래 내역 드로어 -->
-<div id="drawer-backdrop" class="modal-backdrop" hidden>
-  <div class="modal">
-    <div class="modal-head">
-      <h3 id="drawer-title">거래 내역</h3>
-      <button id="drawer-close" class="btn-icon">✕</button>
+<!-- 자산 상세 드로어 -->
+<div id="drawer-backdrop" class="modal-backdrop drawer-backdrop" hidden>
+  <div class="modal asset-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="modal-head drawer-head">
+      <h3 id="drawer-title">자산 상세</h3>
+      <button id="drawer-close" class="btn-icon" aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
     </div>
-    <div id="drawer-body" class="list"></div>
+    <div id="drawer-body" class="drawer-body"></div>
   </div>
 </div>
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="/js/app.js"></script>
+<script src="/js/app.js?v=20260903-2"></script>
 </body>
 </html>
