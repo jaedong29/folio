@@ -15,6 +15,8 @@ import com.assetdashboard.evidence.calculation.EvidenceConclusion;
 import com.assetdashboard.evidence.evaluation.FinancialEvidenceEvaluationHarness;
 import com.assetdashboard.evidence.evaluation.FinancialEvidenceGoldenCase;
 import com.assetdashboard.evidence.evaluation.FinancialEvidenceGoldenSetLoader;
+import com.assetdashboard.evidence.document.SymbolEvidenceAnswerGuardrail;
+import com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter;
 import com.assetdashboard.evidence.news.NewsAnswerGuardrail;
 import com.assetdashboard.evidence.news.NewsEvidenceItem;
 import com.assetdashboard.evidence.news.NewsEvidenceResponse;
@@ -57,6 +59,10 @@ class FinancialEvidenceAgentServiceTest {
   private final FinancialEvidenceEvaluationHarness evaluationHarness =
       mock(FinancialEvidenceEvaluationHarness.class);
   private final LlmUsageBudgetService budgetService = mock(LlmUsageBudgetService.class);
+  private final SymbolEvidenceToolAdapter symbolEvidenceToolAdapter =
+      mock(SymbolEvidenceToolAdapter.class);
+  private final SymbolEvidenceAnswerGuardrail symbolEvidenceAnswerGuardrail =
+      new SymbolEvidenceAnswerGuardrail();
   private final FinancialEvidenceAgentService service =
       new FinancialEvidenceAgentService(
           modelClient,
@@ -80,7 +86,9 @@ class FinancialEvidenceAgentServiceTest {
           traceService,
           goldenSetLoader,
           evaluationHarness,
-          budgetService);
+          budgetService,
+          symbolEvidenceToolAdapter,
+          symbolEvidenceAnswerGuardrail);
 
   @Test
   void usesApplicationGroundingAndRecordsTotals() {
@@ -408,6 +416,66 @@ class FinancialEvidenceAgentServiceTest {
   }
 
   @Test
+  void routesSymbolEvidenceQuestionToUserRegisteredDocumentsNotSharedNews() {
+    String question = "등록된 DART 공시의 핵심 내용을 알려줘";
+    com.assetdashboard.evidence.document.SymbolEvidenceItem item =
+        new com.assetdashboard.evidence.document.SymbolEvidenceItem(
+            5L,
+            com.assetdashboard.evidence.document.EvidenceSourceType.OFFICIAL,
+            com.assetdashboard.evidence.document.EvidenceTrust.VERIFIED_OFFICIAL,
+            "삼성전자 분기보고서",
+            "DART",
+            "https://dart.fss.or.kr/report/1",
+            Instant.parse("2026-09-02T00:00:00Z"),
+            "Quarterly report content.");
+    com.assetdashboard.evidence.document.SymbolEvidenceResponse payload =
+        new com.assetdashboard.evidence.document.SymbolEvidenceResponse(
+            "evidence-trace",
+            42L,
+            "005930",
+            1,
+            EvidenceConclusion.CONFIRMED,
+            Instant.parse("2026-09-03T00:00:00Z"),
+            List.of(item),
+            List.of("등록된 자료와 가격 변동의 인과관계는 확인할 수 없습니다."));
+    GroundedToolResult grounding =
+        new GroundedToolResult(
+            com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter.TOOL_NAME,
+            EvidenceConclusion.CONFIRMED,
+            Set.of("EVIDENCE_AVAILABLE", "VERIFIED_OFFICIAL", "untrustedContent=true"),
+            List.of("asset:42", "evidence:5"));
+    AgentToolCallResponse toolCall =
+        new AgentToolCallResponse(
+            "call-evidence",
+            com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter.TOOL_NAME,
+            42L,
+            "nim-model",
+            10,
+            new AgentTokenUsage(100L, 10L));
+    when(modelClient.requestTool(
+            question, 42L, com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter.TOOL_NAME))
+        .thenReturn(toolCall);
+    when(symbolEvidenceToolAdapter.execute(7L, 42L))
+        .thenReturn(
+            new com.assetdashboard.evidence.document.SymbolEvidenceToolResult(
+                payload, grounding));
+    when(modelClient.composeGroundedAnswer(
+            question, toolCall, payload, EvidenceConclusion.CONFIRMED))
+        .thenReturn(
+            new AgentModelResponse(
+                "DART 공시 핵심 내용을 요약했습니다.", "nim-model", 20, new AgentTokenUsage(200L, 20L)));
+
+    FinancialAgentResponse response = service.ask(7L, 42L, question);
+
+    assertThat(response.intent()).isEqualTo(FinancialQuestionIntent.SYMBOL_EVIDENCE);
+    assertThat(response.toolsUsed())
+        .containsExactly(com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter.TOOL_NAME);
+    assertThat(response.evidenceReferenceIds()).containsExactly("asset:42", "evidence:5");
+    verify(toolAdapter, never()).execute(any(), any());
+    verify(newsToolAdapter, never()).execute(any(), any());
+  }
+
+  @Test
   void productionModeRoutesDeterministicallyAndSkipsModelWhenNewsIsUnavailable() {
     FinancialEvidenceAgentService fastService =
         new FinancialEvidenceAgentService(
@@ -432,7 +500,9 @@ class FinancialEvidenceAgentServiceTest {
             traceService,
             goldenSetLoader,
             evaluationHarness,
-            budgetService);
+            budgetService,
+          symbolEvidenceToolAdapter,
+          symbolEvidenceAnswerGuardrail);
     String question = "이 자산의 최신 뉴스를 알려줘";
     NewsEvidenceResponse payload =
         new NewsEvidenceResponse(

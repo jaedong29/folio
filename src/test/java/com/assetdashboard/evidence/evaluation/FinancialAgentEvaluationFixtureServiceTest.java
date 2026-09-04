@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.assetdashboard.domain.user.entity.User;
 import com.assetdashboard.domain.user.repository.UserRepository;
 import com.assetdashboard.evidence.calculation.EvidenceConclusion;
+import com.assetdashboard.evidence.document.EvidenceTrust;
+import com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter;
+import com.assetdashboard.evidence.document.SymbolEvidenceToolResult;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolAdapter;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolResult;
 import com.assetdashboard.evidence.news.NewsEvidenceToolAdapter;
@@ -30,6 +33,7 @@ class FinancialAgentEvaluationFixtureServiceTest {
   @Autowired private AssetEvidenceToolAdapter toolAdapter;
   @Autowired private NewsEvidenceToolAdapter newsToolAdapter;
   @Autowired private PriceTrendEvidenceToolAdapter trendToolAdapter;
+  @Autowired private SymbolEvidenceToolAdapter symbolEvidenceToolAdapter;
 
   @ParameterizedTest(name = "{0} fixture는 {1} 결론과 결정적 fact를 만든다")
   @MethodSource("fixtureCases")
@@ -79,6 +83,68 @@ class FinancialAgentEvaluationFixtureServiceTest {
             "endPrice",
             "pointCount",
             "directionRule");
+  }
+
+  @ParameterizedTest(name = "{0} fixture는 {1} 결론과 결정적 fact를 만든다 (symbol evidence)")
+  @MethodSource("symbolEvidenceFixtureCases")
+  void createsSymbolEvidenceWithoutLeakingOtherUsersDocuments(
+      String caseId, EvidenceConclusion conclusion, Set<String> requiredFacts) {
+    User user =
+        userRepository.save(
+            User.create("nim-eval-" + caseId + "@example.com", "encoded", "eval"));
+
+    EvaluationFixtureResponse fixture = fixtureService.create(user.getId(), caseId);
+    SymbolEvidenceToolResult result =
+        symbolEvidenceToolAdapter.execute(user.getId(), fixture.assetId());
+
+    assertThat(fixture.caseId()).isEqualTo(caseId);
+    assertThat(result.grounding().conclusion()).isEqualTo(conclusion);
+    assertThat(result.grounding().evidenceFacts()).containsAll(requiredFacts);
+  }
+
+  @org.junit.jupiter.api.Test
+  void crossUserDocumentFixtureNeverLeaksTheOtherUsersTitleOrContent() {
+    User user =
+        userRepository.save(User.create("nim-eval-cross-user@example.com", "encoded", "eval"));
+
+    EvaluationFixtureResponse fixture = fixtureService.create(user.getId(), "cross-user-document");
+    SymbolEvidenceToolResult result =
+        symbolEvidenceToolAdapter.execute(user.getId(), fixture.assetId());
+
+    assertThat(result.grounding().conclusion()).isEqualTo(EvidenceConclusion.UNAVAILABLE);
+    assertThat(result.payload().items()).isEmpty();
+  }
+
+  private static Stream<Arguments> symbolEvidenceFixtureCases() {
+    return Stream.of(
+        Arguments.of(
+            "no-symbol-evidence",
+            EvidenceConclusion.UNAVAILABLE,
+            Set.of("EVIDENCE_UNAVAILABLE", "documentCount=0")),
+        Arguments.of(
+            "user-asserted-official",
+            EvidenceConclusion.PARTIAL,
+            Set.of(EvidenceTrust.USER_ASSERTED_OFFICIAL.name(), "documentId")),
+        Arguments.of(
+            "verified-dart",
+            EvidenceConclusion.CONFIRMED,
+            Set.of(EvidenceTrust.VERIFIED_OFFICIAL.name(), "documentId", "sourceUrl")),
+        Arguments.of(
+            "verified-kind",
+            EvidenceConclusion.CONFIRMED,
+            Set.of(EvidenceTrust.VERIFIED_OFFICIAL.name(), "documentId", "publishedAt")),
+        Arguments.of(
+            "verified-sec",
+            EvidenceConclusion.CONFIRMED,
+            Set.of(EvidenceTrust.VERIFIED_OFFICIAL.name(), "documentId", "sourceUrl")),
+        Arguments.of(
+            "prompt-injection",
+            EvidenceConclusion.PARTIAL,
+            Set.of("untrustedContent=true", "documentId")),
+        Arguments.of(
+            "cross-user-document",
+            EvidenceConclusion.UNAVAILABLE,
+            Set.of("EVIDENCE_UNAVAILABLE", "documentCount=0")));
   }
 
   private static Stream<Arguments> fixtureCases() {

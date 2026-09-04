@@ -38,7 +38,14 @@ public class LiveEvaluationBatchQueueService {
           "stale-price",
           "stale-fx",
           "transaction-evidence",
-          "price-direction");
+          "price-direction",
+          "no-symbol-evidence",
+          "user-asserted-official",
+          "verified-dart",
+          "verified-kind",
+          "verified-sec",
+          "prompt-injection",
+          "cross-user-document");
 
   private final LiveEvaluationBatchJobRepository repository;
   private final FinancialAgentProperties properties;

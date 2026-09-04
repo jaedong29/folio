@@ -33,7 +33,9 @@ public class FinancialAgentEvaluationController {
       summary = "골든 케이스 합성 자산 생성",
       description =
           "지원: fresh-valuation, missing-price, missing-fx, missing-cost-basis, symbol-official-news, "
-              + "stale-price, stale-fx, transaction-evidence, price-direction")
+              + "stale-price, stale-fx, transaction-evidence, price-direction, no-symbol-evidence, "
+              + "user-asserted-official, verified-dart, verified-kind, verified-sec, prompt-injection, "
+              + "cross-user-document")
   @PostMapping("/fixtures/{caseId}")
   public ResponseEntity<EvaluationFixtureResponse> createFixture(
       @CurrentUserId Long userId, @PathVariable String caseId) {

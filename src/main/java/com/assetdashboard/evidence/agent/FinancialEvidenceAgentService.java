@@ -1,6 +1,10 @@
 package com.assetdashboard.evidence.agent;
 
 import com.assetdashboard.evidence.calculation.EvidenceConclusion;
+import com.assetdashboard.evidence.document.SymbolEvidenceAnswerGuardrail;
+import com.assetdashboard.evidence.document.SymbolEvidenceResponse;
+import com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter;
+import com.assetdashboard.evidence.document.SymbolEvidenceToolResult;
 import com.assetdashboard.evidence.evaluation.FinancialEvidenceEvaluationHarness;
 import com.assetdashboard.evidence.evaluation.FinancialEvidenceGoldenCase;
 import com.assetdashboard.evidence.evaluation.FinancialEvidenceGoldenSetLoader;
@@ -52,6 +56,8 @@ public class FinancialEvidenceAgentService {
   private final FinancialEvidenceGoldenSetLoader goldenSetLoader;
   private final FinancialEvidenceEvaluationHarness evaluationHarness;
   private final LlmUsageBudgetService budgetService;
+  private final SymbolEvidenceToolAdapter symbolEvidenceToolAdapter;
+  private final SymbolEvidenceAnswerGuardrail symbolEvidenceAnswerGuardrail;
 
   public FinancialAgentResponse ask(Long userId, Long assetId, String question) {
     Execution execution = execute(userId, assetId, question, properties.strictToolSelection());
@@ -172,6 +178,10 @@ public class FinancialEvidenceAgentService {
       NewsEvidenceToolResult result = newsEvidenceToolAdapter.execute(userId, assetId);
       return new ToolExecution(result.payload(), result.grounding());
     }
+    if (SymbolEvidenceToolAdapter.TOOL_NAME.equals(toolName)) {
+      SymbolEvidenceToolResult result = symbolEvidenceToolAdapter.execute(userId, assetId);
+      return new ToolExecution(result.payload(), result.grounding());
+    }
     throw new BusinessException(ErrorCode.INVALID_INPUT, "지원하지 않는 금융 Agent Tool입니다.");
   }
 
@@ -185,6 +195,17 @@ public class FinancialEvidenceAgentService {
         GuardrailDecision decision =
             newsAnswerGuardrail.apply(
                 null, (NewsEvidenceResponse) toolExecution.payload());
+        return new AnswerExecution(
+            new AgentModelResponse(
+                decision.answer(), toolCall.model(), 0, new AgentTokenUsage(0L, 0L)),
+            true,
+            false,
+            decision.violationCode());
+      }
+      if (intent == FinancialQuestionIntent.SYMBOL_EVIDENCE) {
+        SymbolEvidenceAnswerGuardrail.GuardrailDecision decision =
+            symbolEvidenceAnswerGuardrail.apply(
+                null, (SymbolEvidenceResponse) toolExecution.payload());
         return new AnswerExecution(
             new AgentModelResponse(
                 decision.answer(), toolCall.model(), 0, new AgentTokenUsage(0L, 0L)),
@@ -224,6 +245,21 @@ public class FinancialEvidenceAgentService {
         return new AnswerExecution(
             guardedAnswer, false, decision.replaced(), decision.violationCode());
       }
+      if (intent == FinancialQuestionIntent.SYMBOL_EVIDENCE) {
+        SymbolEvidenceAnswerGuardrail.GuardrailDecision decision =
+            symbolEvidenceAnswerGuardrail.apply(
+                modelAnswer.finalAnswer(), (SymbolEvidenceResponse) toolExecution.payload());
+        AgentModelResponse guardedAnswer =
+            decision.replaced()
+                ? new AgentModelResponse(
+                    decision.answer(),
+                    modelAnswer.model(),
+                    modelAnswer.latencyMs(),
+                    modelAnswer.tokenUsage())
+                : modelAnswer;
+        return new AnswerExecution(
+            guardedAnswer, false, decision.replaced(), decision.violationCode());
+      }
       return new AnswerExecution(modelAnswer, false, false, null);
     }
     PriceTrendAnswerGuardrail.GuardrailDecision decision =
@@ -244,7 +280,8 @@ public class FinancialEvidenceAgentService {
   private boolean isDeterministicUnavailable(
       FinancialQuestionIntent intent, GroundedToolResult grounding) {
     return (intent == FinancialQuestionIntent.PRICE_TREND
-            || intent == FinancialQuestionIntent.SYMBOL_NEWS)
+            || intent == FinancialQuestionIntent.SYMBOL_NEWS
+            || intent == FinancialQuestionIntent.SYMBOL_EVIDENCE)
         && grounding.conclusion() == EvidenceConclusion.UNAVAILABLE;
   }
 
@@ -337,9 +374,11 @@ public class FinancialEvidenceAgentService {
               "answer-guardrail",
               "model-answer",
               AgentTraceStepType.GUARDRAIL,
-              intent == FinancialQuestionIntent.SYMBOL_NEWS
-                  ? "newsCausalityValidation"
-                  : "priceTrendClaimValidation",
+              switch (intent) {
+                case SYMBOL_NEWS -> "newsCausalityValidation";
+                case SYMBOL_EVIDENCE -> "symbolEvidenceTrustValidation";
+                default -> "priceTrendClaimValidation";
+              },
               AgentTraceStepStatus.BLOCKED,
               0,
               answerExecution.guardrailCode(),

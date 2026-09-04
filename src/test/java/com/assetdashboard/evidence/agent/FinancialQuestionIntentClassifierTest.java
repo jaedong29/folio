@@ -26,4 +26,20 @@ class FinancialQuestionIntentClassifierTest {
     assertThat(classifier.classify("ZEC의 최신 공식 개발 소식을 알려줘"))
         .isEqualTo(FinancialQuestionIntent.SYMBOL_NEWS);
   }
+
+  @Test
+  void routesUserRegisteredDocumentQuestionToSymbolEvidenceNotSharedNews() {
+    assertThat(classifier.classify("사용자가 공식자료로 등록한 Apple 문서를 근거로 요약해줘"))
+        .isEqualTo(FinancialQuestionIntent.SYMBOL_EVIDENCE);
+  }
+
+  @Test
+  void routesKnownFilingSystemNamesToSymbolEvidence() {
+    assertThat(classifier.classify("AAPL과 연결된 SEC filing을 보여줘"))
+        .isEqualTo(FinancialQuestionIntent.SYMBOL_EVIDENCE);
+    assertThat(classifier.classify("KIND에 등록된 IR 자료를 찾아줘"))
+        .isEqualTo(FinancialQuestionIntent.SYMBOL_EVIDENCE);
+    assertThat(classifier.classify("등록된 DART 공시의 핵심 내용을 알려줘"))
+        .isEqualTo(FinancialQuestionIntent.SYMBOL_EVIDENCE);
+  }
 }

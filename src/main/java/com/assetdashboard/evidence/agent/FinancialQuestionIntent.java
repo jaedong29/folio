@@ -1,5 +1,6 @@
 package com.assetdashboard.evidence.agent;
 
+import com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolAdapter;
 import com.assetdashboard.evidence.news.NewsEvidenceToolAdapter;
 import com.assetdashboard.evidence.trend.PriceTrendEvidenceToolAdapter;
@@ -8,7 +9,8 @@ import com.assetdashboard.evidence.trend.PriceTrendEvidenceToolAdapter;
 public enum FinancialQuestionIntent {
   ASSET_CALCULATION(AssetEvidenceToolAdapter.TOOL_NAME),
   PRICE_TREND(PriceTrendEvidenceToolAdapter.TOOL_NAME),
-  SYMBOL_NEWS(NewsEvidenceToolAdapter.TOOL_NAME);
+  SYMBOL_NEWS(NewsEvidenceToolAdapter.TOOL_NAME),
+  SYMBOL_EVIDENCE(SymbolEvidenceToolAdapter.TOOL_NAME);
 
   private final String requiredToolName;
 

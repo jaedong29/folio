@@ -70,4 +70,8 @@ LLM을 연결한 뒤 응답을 눈으로 보고 “그럴듯하다”고 판단�
 → 골든셋 자동 채점
 ```
 
-현재 최소 하네스, 4개 계산 fixture, 등록 자산의 `price-direction`, 공용 공식자료의 `symbol-official-news` 계약까지 구현했다. 가격 방향은 최근 일별 가격 변화율을 서버가 계산하고, 모델이 평가손익률을 추세 근거로 사용하면 출력 Guardrail이 답변을 교체한다. 뉴스는 출처와 발표시각을 구조화된 근거로 사용하며 가격 변동의 직접 원인 단정을 차단한다. 나머지 fixture의 실제 데이터 구성과 일괄 Runner는 아직 구현하지 않았다.
+현재 18개 중 16개의 실제 fixture와 Tool을 구현했다: 계산 6건(`getAssetEvidence`), 방향성 1건(`getPriceTrendEvidence`), 공용 뉴스 1건(`searchSymbolNews`), 사용자 등록 근거 자료 8건(`searchSymbolEvidence`)이다. 가격 방향은 최근 일별 가격 변화율을 서버가 계산하고, 모델이 평가손익률을 추세 근거로 사용하면 출력 Guardrail이 답변을 교체한다. 뉴스와 사용자 등록 근거 자료 모두 출처·신뢰 등급·발표시각을 구조화된 근거로 사용하며, 뉴스는 가격 변동의 직접 원인 단정을, 등록 근거 자료는 그 인과 단정과 함께 문서 안에 섞인 지시문을 그대로 따라 말하는 것과 신뢰 등급 과장(`USER_ASSERTED_OFFICIAL`을 "검증된 공식 출처"라고 말하는 것)을 각각 결정적 Guardrail로 차단한다.
+
+`searchSymbolEvidence`는 질문당 Tool을 정확히 하나만 호출하는 현재 Agent 구조를 그대로 따른다. 문서 검색과 단건 조회를 분리하는 `getEvidenceDocument`는 별도 Tool로 노출하지 않고, `searchSymbolEvidence` 응답에 문서 본문까지 포함해 한 번의 호출로 끝낸다.
+
+남은 2개(`news-correlation`, `future-document`)는 이 구조로는 풀리지 않는다. `news-correlation`은 한 질문에 `getAssetEvidence`(가격 계산)와 `searchSymbolEvidence`(근거 자료) 두 Tool의 결과를 합쳐야 하는데 지금은 Tool 하나만 호출할 수 있고, `future-document`는 질문 문장에서 날짜를 뽑아 `publishedAt` 기준으로 필터링해야 하는데 지금 Agent에는 질문에서 날짜를 파싱하는 기능이 없다. 두 사례 모두 golden set에는 계약으로 남겨뒀지만 fixture와 일괄 Runner 연결은 다음 과제다.

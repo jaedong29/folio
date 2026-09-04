@@ -1,6 +1,7 @@
 package com.assetdashboard.evidence.agent;
 
 import com.assetdashboard.evidence.calculation.EvidenceConclusion;
+import com.assetdashboard.evidence.document.SymbolEvidenceToolAdapter;
 import com.assetdashboard.evidence.tool.AssetEvidenceToolAdapter;
 import com.assetdashboard.evidence.news.NewsEvidenceToolAdapter;
 import com.assetdashboard.evidence.trend.PriceTrendEvidenceToolAdapter;
@@ -241,6 +242,8 @@ public class NvidiaNimFinancialAgentModelClient implements FinancialAgentModelCl
               "현재 사용자의 등록 자산에 대한 최근 7개 일별 가격과 서버 계산 방향 근거를 조회한다.";
           case NewsEvidenceToolAdapter.TOOL_NAME ->
               "현재 사용자의 등록 자산 symbol과 연결된 공용 공식자료·뉴스를 최신순으로 조회한다.";
+          case SymbolEvidenceToolAdapter.TOOL_NAME ->
+              "현재 사용자가 이 자산 symbol에 직접 등록한 근거 자료(공식자료·뉴스·메모)를 신뢰 등급과 함께 조회한다.";
           default -> throw new IllegalArgumentException("지원하지 않는 금융 Agent Tool입니다: " + toolName);
         };
     return new Tool("function", new FunctionDefinition(toolName, description, parameters));

@@ -65,7 +65,7 @@ Folio의 AI 기능은 투자 결정을 대신하거나 가격 변동 원인을 �
 
 ### 최소 평가 하네스와 Trace
 
-`AgentRunResult`를 18개 골든셋 계약과 비교하는 `RuleBasedFinancialEvidenceScorer`를 추가했다. 실제 DB 합성 자산을 사용하는 `fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis` 4개 사례, 가격 이력을 사용하는 `price-direction`, 공식자료를 사용하는 `symbol-official-news` 사례로 Tool·결론·필수 근거와 hard failure를 검증한다.
+`AgentRunResult`를 18개 골든셋 계약과 비교하는 `RuleBasedFinancialEvidenceScorer`를 추가했다. 18개 중 16개를 실제 DB 합성 자산 fixture로 검증한다: `getAssetEvidence` 계산 7건(`fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`, `stale-price`, `stale-fx`, `transaction-evidence`), `getPriceTrendEvidence` 1건(`price-direction`), `searchSymbolNews` 1건(`symbol-official-news`), `searchSymbolEvidence` 7건(`no-symbol-evidence`, `user-asserted-official`, `verified-dart`, `verified-kind`, `verified-sec`, `prompt-injection`, `cross-user-document`)으로 Tool·결론·필수 근거와 hard failure를 검증한다. 나머지 2건(`news-correlation`, `future-document`)은 한 질문당 Tool 하나만 호출하는 현재 구조로는 풀리지 않아 fixture를 연결하지 않았다.
 
 LLM 응답은 `AgentModelResponse.finalAnswer`만 생성한다. `AssetEvidenceFactExtractor`가 `AssetEvidenceService`의 warning·null·계산 필드에서 evidenceFacts를 만들고, `EvidenceConclusionPolicy`가 Tool 결론을 조합한다. `GroundedAgentRunAssembler`는 완료된 Tool Trace와 결정적 Tool 결과의 이름이 다르면 실행 결과 생성을 거부한다.
 
@@ -79,7 +79,7 @@ NVIDIA NIM의 OpenAI 호환 Chat Completions를 사용하는 첫 단일 자산 A
 
 ```text
 질문 + 경로 assetId
-→ 결정적 질문 분류기가 자산 계산·가격 방향·심볼 공식자료 근거를 선택
+→ 결정적 질문 분류기가 자산 계산·가격 방향·공용 뉴스·사용자 등록 근거 자료 중 하나를 선택
 → 일반 질문은 서버 라우터가 Tool을 선택하고, 평가는 NIM의 강제 Tool 선택까지 검증
 → 모델 Tool 이름과 assetId 검증
 → 인증 사용자 id로 선택된 읽기 전용 Tool Adapter 실행
@@ -108,7 +108,7 @@ NVIDIA NIM의 OpenAI 호환 Chat Completions를 사용하는 첫 단일 자산 A
 
 현재 NIM Trial은 외부 서비스이므로 실제 실행 시 Tool payload가 NVIDIA로 전송된다. 개인 금융정보 대신 합성 데모 계정으로 먼저 검증해야 한다. 자동 테스트는 실제 NIM을 호출하지 않고 모의 HTTP 서버를 사용한다.
 
-local 전용 비동기 Live Runner는 caseId 9개(계산 6건 — `fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`, `stale-price`, `stale-fx`, `transaction-evidence` — 방향성 1건 `price-direction`, 뉴스 1건 `symbol-official-news`)의 실제 상태를 fixture로 구성해 최대 5케이스까지 한 번에 실행할 수 있다. `caseIds`를 비우면 기본 5건(계산 4건 + `symbol-official-news`)을 실행하고, 나머지 4건은 명시적으로 골라야 한다. 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 한 배치의 제공자 호출 상한은 요청 케이스 수 × 2다. `confirmLiveCalls=true`가 없으면 외부 모델을 호출하지 않으며, 동일 사용자의 활성 배치는 재사용해 중복 비용을 막는다. 배치에는 케이스별 Trace ID와 판정, hard failure, 지연·토큰·관찰된 모델 단계 수만 저장하고 질문·답변 원문은 저장하지 않는다. 나머지 9개 골든셋(`searchSymbolEvidence`, `getEvidenceDocument` 사례)은 그 두 Tool이 아직 Agent에 연결되지 않아 fixture 구성만으로는 확장할 수 없다.
+local 전용 비동기 Live Runner는 caseId 16개(계산 7건, 방향성 1건 `price-direction`, 공용 뉴스 1건 `symbol-official-news`, 사용자 등록 근거 자료 7건)의 실제 상태를 fixture로 구성해 최대 5케이스까지 한 번에 실행할 수 있다. `caseIds`를 비우면 기본 5건(계산 4건 + `symbol-official-news`)을 실행하고, 나머지 11건은 명시적으로 골라야 한다. 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 한 배치의 제공자 호출 상한은 요청 케이스 수 × 2다. `confirmLiveCalls=true`가 없으면 외부 모델을 호출하지 않으며, 동일 사용자의 활성 배치는 재사용해 중복 비용을 막는다. 배치에는 케이스별 Trace ID와 판정, hard failure, 지연·토큰·관찰된 모델 단계 수만 저장하고 질문·답변 원문은 저장하지 않는다. 나머지 2개 골든셋(`news-correlation`, `future-document`)은 한 질문당 Tool 하나만 호출하는 현재 구조와 질문에서 날짜를 파싱하는 기능이 없어 fixture를 연결하지 않았다.
 
 ### 공용 News와 Agent Tool
 
@@ -162,7 +162,7 @@ local 프로필에서는 실제 개인정보 대신 합성 자산으로 NIM 실�
 
 ## 4. 다음 구현 순서
 
-1. `searchSymbolEvidence`, `getEvidenceDocument`를 Agent Tool로 연결한 뒤, 그 Tool을 쓰는 나머지 9개 골든셋의 fixture를 구성해 실제 NIM 배치를 18개 전체로 확장한다.
+1. `news-correlation`(계산+근거 자료 두 Tool을 한 질문에서 함께 써야 함)과 `future-document`(질문에서 날짜를 뽑아 `publishedAt`으로 필터링해야 함)를 실행하려면 한 질문당 Tool 하나만 호출하는 현재 구조를 멀티 Tool 체이닝으로 확장해야 한다. 비용·지연이 늘어나는 설계 변경이라 별도로 검토한다.
 2. DART·SEC·기업 IR처럼 재배포 조건이 명확한 공식 출처 Adapter를 하나씩 추가한다.
 3. 일반 언론은 전문 복제보다 제목·요약·원문 링크 중심의 라이선스 정책부터 확정한다.
 4. Prompt Injection fixture를 공용 News Tool 입력까지 통과시키는 회귀 테스트를 추가한다.

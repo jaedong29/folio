@@ -33,7 +33,7 @@ Folio는 증권 주문 앱이나 금융기관 연동 서비스가 아닙니다. 
 | Search | KRX KIND KOSPI·KOSDAQ 2,595종목 로컬 자동완성, 사용자 심볼과 Yahoo 조회 심볼 분리 |
 | Analysis | 09:00 KST 기준 Portfolio Snapshot, 외부 입출금을 보정한 Daily PnL, 기간별 자산 분석 |
 | Financial Evidence | 가격·환율·평단·최근 거래 근거 조회, `CONFIRMED/PARTIAL/UNAVAILABLE` 판정 |
-| Personal Evidence | 등록 자산별 자료·메모 붙여넣기, 출처 메타데이터·중복 방지·키워드 검색 |
+| Personal Evidence | 등록 자산별 자료·메모 붙여넣기, 출처 메타데이터·중복 방지·키워드 검색, Agent용 `searchSymbolEvidence` Tool |
 | Shared News | 공용 공식자료 저장, 출처 화이트리스트, 비동기 수집·중복 제거·TTL, 전체/내 자산 필터, NIM 한국어 요약 캐시 |
 | Auth | 짧은 Access Token + 회전·폐기되는 Refresh Token, 로그인 잠금·IP 요청 제한, BCrypt 비밀번호, 이메일 중복확인, 비밀번호 변경·회원 탈퇴, 소유권 기반 404 인가 정책 |
 | UX | 금액 가리기, 모바일 현재가 펼쳐보기, 빈 값·stale 상태 표시, 구체적인 오류 안내 |
@@ -240,7 +240,7 @@ Financial Evidence Agent와 News 요약은 하루 NIM 호출 수·토큰 사용�
 
 실제 NIM 응답을 단일 자산 골든케이스로 평가하려면 Swagger에서 local 전용 API를 순서대로 호출한다. 합성 fixture를 제공하는 caseId는 `fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`다.
 
-반복 검증은 `POST /api/ai/evaluations/live-runs`에 `{"confirmLiveCalls":true,"caseIds":[]}`를 보내면 된다. 빈 목록은 계산 4건과 `symbol-official-news`를 합친 기본 5건을 뜻하며, HTTP 요청과 분리된 Worker가 순차 실행한다. 실제로 실행 가능한 caseId는 9개(`fresh-valuation`, `missing-price`, `missing-fx`, `missing-cost-basis`, `symbol-official-news`, `stale-price`, `stale-fx`, `transaction-evidence`, `price-direction`)이며, 기본 5건 이외의 나머지 4건은 `caseIds`에 명시해야 한다. 한 배치는 몇 개를 고르든 최대 5케이스로 제한되고 같은 사용자의 활성 배치는 재사용한다. 평가 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 5케이스의 최대 제공자 호출 수는 10회이며, 응답은 이 상한과 Trace에서 관찰된 모델 단계 수를 함께 보여준다. `GET /api/ai/evaluations/live-runs/{batchId}`에서 케이스별 Trace, 통과 여부, hard failure, 평균·P95 지연, 총 토큰을 확인한다. 질문·답변 원문은 배치 테이블에 저장하지 않는다.
+반복 검증은 `POST /api/ai/evaluations/live-runs`에 `{"confirmLiveCalls":true,"caseIds":[]}`를 보내면 된다. 빈 목록은 계산 4건과 `symbol-official-news`를 합친 기본 5건을 뜻하며, HTTP 요청과 분리된 Worker가 순차 실행한다. 실제로 실행 가능한 caseId는 16개(계산 7건, `price-direction`, `symbol-official-news`, 사용자 등록 근거 자료 7건 — `no-symbol-evidence`, `user-asserted-official`, `verified-dart`, `verified-kind`, `verified-sec`, `prompt-injection`, `cross-user-document`)이며, 기본 5건 이외의 나머지 11건은 `caseIds`에 명시해야 한다. 한 배치는 몇 개를 고르든 최대 5케이스로 제한되고 같은 사용자의 활성 배치는 재사용한다. 평가 케이스마다 Tool 선택과 답변 생성에 최대 2회 모델을 사용하므로 5케이스의 최대 제공자 호출 수는 10회이며, 응답은 이 상한과 Trace에서 관찰된 모델 단계 수를 함께 보여준다. `GET /api/ai/evaluations/live-runs/{batchId}`에서 케이스별 Trace, 통과 여부, hard failure, 평균·P95 지연, 총 토큰을 확인한다. 질문·답변 원문은 배치 테이블에 저장하지 않는다.
 
 ```text
 POST /api/ai/evaluations/fixtures/{caseId}
@@ -398,14 +398,10 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 
 우선순위는 기능 확장보다 현재 정합성을 더 명확하게 만드는 데 둡니다.
 
-1. Symbol 문서 검색에도 결정적 fact extractor·conclusion policy 연결
-2. Prompt Injection fixture를 사용하는 Tool 입력 파서·시스템 규칙 회귀 테스트
-3. `searchSymbolEvidence`, `getEvidenceDocument`를 Agent 읽기 전용 Tool로 연결
-4. 결정적 질문 라우터와 모델의 자동 Tool 선택 평가 분리
-5. 나머지 9개 골든셋(`searchSymbolEvidence`, `getEvidenceDocument`를 쓰는 사례)은 그 두 Tool 자체가 아직 Agent에 연결되지 않아 fixture만으로는 확장할 수 없다. Tool을 먼저 연결해야 18개 전체 Runner가 완성된다
-6. Spring AI Observability와 OpenTelemetry Trace 내보내기
-7. 기업별 IR 도메인을 symbol과 안전하게 연결하는 공식 출처 정책 확장
-8. 키워드 검색과 임베딩 검색의 인용 정확도·시점 정확도 비교
+1. `news-correlation`, `future-document` 2개 골든셋은 한 질문당 Tool 하나만 호출하는 현재 구조로는 풀리지 않는다. 멀티 Tool 체이닝(비용·지연 증가) 또는 질문 날짜 파싱이 필요해 별도로 검토한다
+2. Spring AI Observability와 OpenTelemetry Trace 내보내기
+3. 기업별 IR 도메인을 symbol과 안전하게 연결하는 공식 출처 정책 확장
+4. 키워드 검색과 임베딩 검색의 인용 정확도·시점 정확도 비교
 
 MyData·지갑 자동 연동·주문 실행은 이 MVP의 문제 정의를 벗어나므로 당장 확장하지 않습니다.
 
