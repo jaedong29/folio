@@ -10,4 +10,7 @@ public record NewsProperties(
     int readTimeoutMillis,
     long refreshCooldownMinutes,
     int maxItemsPerSource,
-    long workerDelayMillis) {}
+    long workerDelayMillis,
+    boolean summaryEnabled,
+    long summaryWorkerDelayMillis,
+    int summaryMaxContentChars) {}

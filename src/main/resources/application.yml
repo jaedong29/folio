@@ -56,6 +56,10 @@ app:
     refresh-cooldown-minutes: ${APP_NEWS_REFRESH_COOLDOWN_MINUTES:360}
     max-items-per-source: ${APP_NEWS_MAX_ITEMS_PER_SOURCE:10}
     worker-delay-millis: ${APP_NEWS_WORKER_DELAY_MILLIS:1000}
+    # Agent가 켜지면 함께 활성화하되 APP_NEWS_SUMMARY_ENABLED=false로 비용을 따로 차단할 수 있다.
+    summary-enabled: ${APP_NEWS_SUMMARY_ENABLED:${APP_AI_ENABLED:false}}
+    summary-worker-delay-millis: ${APP_NEWS_SUMMARY_WORKER_DELAY_MILLIS:1200}
+    summary-max-content-chars: ${APP_NEWS_SUMMARY_MAX_CONTENT_CHARS:6000}
   ai:
     # 실제 외부 전송은 명시적으로 켠 경우에만 허용한다. API 키는 파일에 저장하지 않는다.
     enabled: ${APP_AI_ENABLED:false}

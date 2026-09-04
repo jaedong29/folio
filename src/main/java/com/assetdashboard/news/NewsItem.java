@@ -87,6 +87,40 @@ public class NewsItem extends BaseTimeEntity {
   @Column(name = "content_hash", nullable = false, length = 64, columnDefinition = "CHAR(64)")
   private String contentHash;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "summary_status", nullable = false, length = 20)
+  private NewsSummaryStatus summaryStatus;
+
+  @Column(name = "summary_ko", length = 500)
+  private String summaryKo;
+
+  @Column(name = "significance_ko", length = 300)
+  private String significanceKo;
+
+  @Column(name = "summary_model", length = 120)
+  private String summaryModel;
+
+  @Column(name = "summary_prompt_version", length = 40)
+  private String summaryPromptVersion;
+
+  @Column(name = "summarized_content_hash", length = 64, columnDefinition = "CHAR(64)")
+  private String summarizedContentHash;
+
+  @Column(name = "summary_error_code", length = 80)
+  private String summaryErrorCode;
+
+  @Column(name = "summary_latency_ms")
+  private Long summaryLatencyMs;
+
+  @Column(name = "summary_input_tokens")
+  private Long summaryInputTokens;
+
+  @Column(name = "summary_output_tokens")
+  private Long summaryOutputTokens;
+
+  @Column(name = "summary_updated_at")
+  private Instant summaryUpdatedAt;
+
   @ElementCollection(fetch = FetchType.EAGER)
   @CollectionTable(
       name = "news_item_symbols",
@@ -103,6 +137,7 @@ public class NewsItem extends BaseTimeEntity {
 
   private NewsItem(CollectedNewsItem item) {
     apply(item);
+    resetSummary();
   }
 
   public static NewsItem create(CollectedNewsItem item) {
@@ -113,7 +148,72 @@ public class NewsItem extends BaseTimeEntity {
   public boolean refresh(CollectedNewsItem item) {
     boolean changed = !contentHash.equals(item.contentHash());
     apply(item);
+    if (changed || summaryStatus == NewsSummaryStatus.FAILED) {
+      resetSummary();
+    }
     return changed;
+  }
+
+  public boolean claimSummary() {
+    if (summaryStatus != NewsSummaryStatus.PENDING) {
+      return false;
+    }
+    summaryStatus = NewsSummaryStatus.RUNNING;
+    summaryErrorCode = null;
+    return true;
+  }
+
+  public boolean completeSummary(
+      String expectedContentHash,
+      NewsSummaryDraft draft,
+      String promptVersion,
+      Instant completedAt) {
+    if (summaryStatus != NewsSummaryStatus.RUNNING || !contentHash.equals(expectedContentHash)) {
+      return false;
+    }
+    summaryStatus = NewsSummaryStatus.COMPLETED;
+    summaryKo = draft.summaryKo().trim();
+    significanceKo = draft.significanceKo().trim();
+    summaryModel = draft.model();
+    summaryPromptVersion = promptVersion;
+    summarizedContentHash = contentHash;
+    summaryErrorCode = null;
+    summaryLatencyMs = draft.latencyMs();
+    summaryInputTokens = draft.inputTokens();
+    summaryOutputTokens = draft.outputTokens();
+    summaryUpdatedAt = completedAt;
+    return true;
+  }
+
+  public boolean failSummary(String expectedContentHash, String errorCode, Instant failedAt) {
+    if (summaryStatus != NewsSummaryStatus.RUNNING || !contentHash.equals(expectedContentHash)) {
+      return false;
+    }
+    summaryStatus = NewsSummaryStatus.FAILED;
+    summaryErrorCode = errorCode;
+    summaryUpdatedAt = failedAt;
+    return true;
+  }
+
+  public void recoverInterruptedSummary() {
+    if (summaryStatus == NewsSummaryStatus.RUNNING) {
+      summaryStatus = NewsSummaryStatus.PENDING;
+      summaryErrorCode = "SUMMARY_INTERRUPTED";
+    }
+  }
+
+  private void resetSummary() {
+    summaryStatus = NewsSummaryStatus.PENDING;
+    summaryKo = null;
+    significanceKo = null;
+    summaryModel = null;
+    summaryPromptVersion = null;
+    summarizedContentHash = null;
+    summaryErrorCode = null;
+    summaryLatencyMs = null;
+    summaryInputTokens = null;
+    summaryOutputTokens = null;
+    summaryUpdatedAt = null;
   }
 
   private void apply(CollectedNewsItem item) {

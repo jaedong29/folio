@@ -8,4 +8,6 @@ public record NewsFeedResponse(
     NewsCategory category,
     List<String> portfolioSymbols,
     List<NewsItemResponse> items,
+    boolean summaryEnabled,
+    long pendingSummaryCount,
     Instant generatedAt) {}

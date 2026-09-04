@@ -12,6 +12,11 @@ public interface NewsItemRepository extends JpaRepository<NewsItem, Long> {
 
   Optional<NewsItem> findBySourceKeyAndExternalId(String sourceKey, String externalId);
 
+  Optional<NewsItem> findFirstBySummaryStatusOrderByPublishedAtDescIdDesc(
+      NewsSummaryStatus summaryStatus);
+
+  List<NewsItem> findAllBySummaryStatus(NewsSummaryStatus summaryStatus);
+
   @Query(
       """
       select distinct n from NewsItem n
@@ -19,7 +24,9 @@ public interface NewsItemRepository extends JpaRepository<NewsItem, Long> {
         and (:queryText is null
           or lower(n.title) like lower(concat('%', :queryText, '%'))
           or lower(n.publisher) like lower(concat('%', :queryText, '%'))
-          or lower(n.excerpt) like lower(concat('%', :queryText, '%')))
+          or lower(n.excerpt) like lower(concat('%', :queryText, '%'))
+          or lower(n.summaryKo) like lower(concat('%', :queryText, '%'))
+          or lower(n.significanceKo) like lower(concat('%', :queryText, '%')))
       order by n.publishedAt desc, n.id desc
       """)
   List<NewsItem> searchAll(
@@ -35,7 +42,9 @@ public interface NewsItemRepository extends JpaRepository<NewsItem, Long> {
         and (:queryText is null
           or lower(n.title) like lower(concat('%', :queryText, '%'))
           or lower(n.publisher) like lower(concat('%', :queryText, '%'))
-          or lower(n.excerpt) like lower(concat('%', :queryText, '%')))
+          or lower(n.excerpt) like lower(concat('%', :queryText, '%'))
+          or lower(n.summaryKo) like lower(concat('%', :queryText, '%'))
+          or lower(n.significanceKo) like lower(concat('%', :queryText, '%')))
       order by n.publishedAt desc, n.id desc
       """)
   List<NewsItem> searchPortfolio(

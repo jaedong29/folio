@@ -25,6 +25,7 @@ class NewsQueryServiceTest {
 
   @Mock private NewsItemRepository newsItemRepository;
   @Mock private AssetRepository assetRepository;
+  @Mock private NewsSummaryModelClient summaryModelClient;
   private NewsQueryService service;
 
   @BeforeEach
@@ -33,6 +34,7 @@ class NewsQueryServiceTest {
         new NewsQueryService(
             newsItemRepository,
             assetRepository,
+            summaryModelClient,
             Clock.fixed(Instant.parse("2026-09-03T00:00:00Z"), ZoneOffset.UTC));
   }
 

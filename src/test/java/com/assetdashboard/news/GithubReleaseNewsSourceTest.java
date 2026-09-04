@@ -25,7 +25,8 @@ class GithubReleaseNewsSourceTest {
   void mapsPublicReleaseToVerifiedSharedEvidence() {
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    NewsProperties properties = new NewsProperties(true, 1000, 1000, 360, 10, 1000);
+    NewsProperties properties =
+        new NewsProperties(true, 1000, 1000, 360, 10, 1000, false, 1200, 6000);
     GithubReleaseNewsSource source =
         new GithubReleaseNewsSource(builder.build(), properties, FIXED_CLOCK);
     server.expect(
@@ -64,7 +65,9 @@ class GithubReleaseNewsSourceTest {
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     GithubReleaseNewsSource source =
         new GithubReleaseNewsSource(
-            builder.build(), new NewsProperties(true, 1000, 1000, 360, 10, 1000), FIXED_CLOCK);
+            builder.build(),
+            new NewsProperties(true, 1000, 1000, 360, 10, 1000, false, 1200, 6000),
+            FIXED_CLOCK);
     server.expect(
             requestTo(
                 "https://api.github.com/repos/ZcashFoundation/zebra/releases?per_page=10"))
@@ -87,7 +90,7 @@ class GithubReleaseNewsSourceTest {
     GithubReleaseNewsSource source =
         new GithubReleaseNewsSource(
             RestClient.create(),
-            new NewsProperties(false, 1000, 1000, 360, 10, 1000),
+            new NewsProperties(false, 1000, 1000, 360, 10, 1000, false, 1200, 6000),
             FIXED_CLOCK);
 
     assertThatThrownBy(source::fetch)

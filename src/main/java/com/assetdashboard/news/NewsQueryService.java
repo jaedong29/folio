@@ -22,6 +22,7 @@ public class NewsQueryService {
 
   private final NewsItemRepository newsItemRepository;
   private final AssetRepository assetRepository;
+  private final NewsSummaryModelClient summaryModelClient;
   private final Clock clock;
 
   @Transactional(readOnly = true)
@@ -51,11 +52,24 @@ public class NewsQueryService {
     } else {
       items = newsItemRepository.searchAll(category, query, PageRequest.of(0, limit));
     }
+    List<NewsItemResponse> responses = items.stream().map(NewsItemResponse::from).toList();
+    boolean summaryEnabled = summaryModelClient.isEnabled();
+    long pendingSummaryCount =
+        summaryEnabled
+            ? responses.stream()
+                .filter(
+                    item ->
+                        item.summaryStatus() == NewsSummaryStatus.PENDING
+                            || item.summaryStatus() == NewsSummaryStatus.RUNNING)
+                .count()
+            : 0;
     return new NewsFeedResponse(
         resolvedScope,
         category,
         portfolioSymbols,
-        items.stream().map(NewsItemResponse::from).toList(),
+        responses,
+        summaryEnabled,
+        pendingSummaryCount,
         Instant.now(clock));
   }
 
