@@ -25,6 +25,7 @@ class RefreshTokenServiceIntegrationTest {
 
   @Autowired private RefreshTokenService service;
   @Autowired private RefreshTokenRepository repository;
+  @Autowired private RefreshTokenFamilyRepository familyRepository;
 
   private Long userId;
 
@@ -32,6 +33,7 @@ class RefreshTokenServiceIntegrationTest {
   void cleanUp() {
     if (userId != null) {
       repository.deleteAllByUserId(userId);
+      familyRepository.deleteAllByUserId(userId);
     }
   }
 
@@ -46,6 +48,10 @@ class RefreshTokenServiceIntegrationTest {
             BusinessException.class,
             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REFRESH_TOKEN));
 
+    assertThat(familyRepository.findAllByUserId(userId))
+        .singleElement()
+        .satisfies(family -> assertThat(family.isRevoked()).isTrue());
+
     // family 전체가 실제로 폐기됐다면, 방금 정상 회전으로 받은 "새" 토큰도 더는 쓸 수 없어야 한다.
     assertThatThrownBy(() -> service.rotate(rotated.token().rawToken()))
         .isInstanceOfSatisfying(
@@ -54,29 +60,66 @@ class RefreshTokenServiceIntegrationTest {
   }
 
   @Test
-  void evictExpiredTokensDeletesOnlyRowsPastTheRetentionWindow() {
+  void rotationDoesNotExtendTheFamilyAbsoluteExpiration() {
+    userId = 6_000_000L + (System.nanoTime() % 1_000_000);
+    IssuedRefreshToken first = service.issue(userId);
+
+    RefreshTokenRotation rotated = service.rotate(first.rawToken());
+
+    assertThat(rotated.token().expiresAt()).isEqualTo(first.expiresAt());
+  }
+
+  @Test
+  void cleanupKeepsOldTokenHashesUntilTheFamilyAbsoluteExpiration() {
     userId = 6_000_000L + (System.nanoTime() % 1_000_000);
     Instant now = Instant.now();
-    RefreshToken longExpired =
+    RefreshTokenFamily activeFamily =
+        RefreshTokenFamily.issue(
+            UUID.randomUUID().toString(),
+            userId,
+            now.minus(30, ChronoUnit.DAYS),
+            now.plus(14, ChronoUnit.DAYS));
+    RefreshToken oldTokenInActiveFamily =
         RefreshToken.issue(
             userId,
-            UUID.randomUUID().toString(),
+            activeFamily.getFamilyId(),
             "evict-test-" + UUID.randomUUID(),
             now.minus(30, ChronoUnit.DAYS),
             now.minus(10, ChronoUnit.DAYS));
-    RefreshToken stillFresh =
+    RefreshTokenFamily expiredFamily =
+        RefreshTokenFamily.issue(
+            UUID.randomUUID().toString(),
+            userId,
+            now.minus(30, ChronoUnit.DAYS),
+            now.minus(10, ChronoUnit.DAYS));
+    RefreshToken tokenInExpiredFamily =
         RefreshToken.issue(
             userId,
-            UUID.randomUUID().toString(),
+            expiredFamily.getFamilyId(),
             "evict-test-" + UUID.randomUUID(),
-            now,
-            now.plus(14, ChronoUnit.DAYS));
-    repository.save(longExpired);
-    repository.save(stillFresh);
+            now.minus(30, ChronoUnit.DAYS),
+            expiredFamily.getExpiresAt());
+    familyRepository.save(activeFamily);
+    familyRepository.save(expiredFamily);
+    repository.save(oldTokenInActiveFamily);
+    repository.save(tokenInExpiredFamily);
 
     service.evictExpiredTokens();
 
-    assertThat(repository.findByTokenHash(longExpired.getTokenHash())).isEmpty();
-    assertThat(repository.findByTokenHash(stillFresh.getTokenHash())).isPresent();
+    assertThat(repository.findByTokenHash(oldTokenInActiveFamily.getTokenHash())).isPresent();
+    assertThat(familyRepository.findById(activeFamily.getFamilyId())).isPresent();
+    assertThat(repository.findByTokenHash(tokenInExpiredFamily.getTokenHash())).isEmpty();
+    assertThat(familyRepository.findById(expiredFamily.getFamilyId())).isEmpty();
+  }
+
+  @Test
+  void deleteAllForUserRemovesBothTokenHashesAndFamilyMetadata() {
+    userId = 7_000_000L + (System.nanoTime() % 1_000_000);
+    service.issue(userId);
+
+    service.deleteAllForUser(userId);
+
+    assertThat(familyRepository.findAllByUserId(userId)).isEmpty();
+    assertThat(repository.findAll()).noneMatch(token -> token.getUserId().equals(userId));
   }
 }

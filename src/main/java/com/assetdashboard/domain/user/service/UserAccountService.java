@@ -20,7 +20,6 @@ import com.assetdashboard.global.audit.AuditAction;
 import com.assetdashboard.global.audit.AuditLogService;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
-import com.assetdashboard.global.security.RefreshTokenRepository;
 import com.assetdashboard.global.security.RefreshTokenService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +42,6 @@ public class UserAccountService {
   private final AgentEvaluationRecordRepository agentEvaluationRecordRepository;
   private final LiveEvaluationBatchJobRepository liveEvaluationBatchJobRepository;
   private final LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
-  private final RefreshTokenRepository refreshTokenRepository;
   private final RefreshTokenService refreshTokenService;
   private final IdempotencyKeyRepository idempotencyKeyRepository;
   private final AuditLogService auditLogService;
@@ -97,7 +95,7 @@ public class UserAccountService {
       agentTraceRunRepository.deleteAllByUserId(userId);
     }
     evidenceDocumentRepository.deleteAllByUserId(userId);
-    refreshTokenRepository.deleteAllByUserId(userId);
+    refreshTokenService.deleteAllForUser(userId);
     idempotencyKeyRepository.deleteAllByUserId(userId);
     if (!assetIds.isEmpty()) {
       transactionRepository.deleteAllByAssetIdIn(assetIds);

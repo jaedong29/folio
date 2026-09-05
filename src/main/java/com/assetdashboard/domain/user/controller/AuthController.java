@@ -103,15 +103,15 @@ public class AuthController {
   }
 
   /**
-   * 이 기기의 Refresh Token만 폐기한다.
+   * 이 기기의 로그인 family를 폐기한다.
    *
    * @param request 폐기할 Refresh Token
    * @return 본문이 없는 성공 응답
    */
   @Operation(
       summary = "로그아웃",
-      description = "제시한 Refresh Token을 서버에서 폐기한다. 이미 발급된 Access Token은 자체 만료 시각까지 "
-          + "유효하므로 만료 시간을 짧게 유지한다. 인증 불필요(Refresh Token 자체가 자격 증명).")
+      description = "제시한 Refresh Token이 속한 로그인 family를 서버에서 폐기한다. 이미 발급된 Access Token은 "
+          + "자체 만료 시각까지 유효하므로 만료 시간을 짧게 유지한다. 인증 불필요(Refresh Token 자체가 자격 증명).")
   @PostMapping("/logout")
   public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
     userService.logout(request.refreshToken());

@@ -130,8 +130,8 @@ public class UserService {
   }
 
   /**
-   * 이 Refresh Token만 폐기한다. Access Token은 자체 만료 시각까지는 계속 유효하다(무상태 JWT의 한계이며,
-   * 그래서 Access Token 수명을 짧게 유지한다).
+   * 이 Refresh Token이 속한 로그인 family를 폐기한다. Access Token은 자체 만료 시각까지는 계속
+   * 유효하다(무상태 JWT의 한계이며, 그래서 Access Token 수명을 짧게 유지한다).
    *
    * @param rawRefreshToken 폐기할 Refresh Token
    */

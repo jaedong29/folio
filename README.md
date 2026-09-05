@@ -176,7 +176,7 @@ SELL : 투자 자산 감소 + 같은 통화 대기자금 증가
 
 회원가입의 이메일 중복확인은 사용 편의를 위한 사전 확인입니다. 최종 중복 방지는 가입 요청과 DB unique constraint에서 다시 수행합니다. 비밀번호 확인은 서버에 저장할 데이터가 아니므로 프론트에서만 검증하고, 비밀번호는 BCrypt로 저장합니다.
 
-Access Token은 탈취돼도 피해가 작도록 짧게 유지합니다(기본 30분, `APP_JWT_EXPIRATION_MINUTES`). 세션 연장은 서버가 저장·회전(rotate)·폐기(revoke)할 수 있는 Refresh Token이 맡습니다. 재발급마다 값이 바뀌며(rotation), 이미 회전에 쓰여 폐기된 토큰이 다시 들어오면 탈취로 간주해 같은 로그인에서 나온 Refresh Token을 모두 폐기하고 재로그인을 요구합니다. 로그아웃(`POST /api/auth/logout`), 비밀번호 변경, 회원 탈퇴는 모두 Refresh Token을 실제로 폐기합니다 — 다만 이미 발급된 Access Token은 무상태 JWT라 자체 만료 시각까지는 계속 유효하므로, 그 노출 창을 좁게 유지하는 것이 이 설계의 핵심입니다. 토큰 원문은 저장하지 않고 SHA-256 해시만 저장합니다.
+Access Token은 탈취돼도 피해가 작도록 짧게 유지합니다(기본 30분, `APP_JWT_EXPIRATION_MINUTES`). 세션 연장은 서버가 저장·회전(rotate)·폐기(revoke)할 수 있는 Refresh Token이 맡습니다. 재발급마다 값은 바뀌지만 로그인 family의 절대 만료(기본 14일)는 연장되지 않습니다. 이미 회전에 쓰여 폐기된 토큰이 다시 들어오면 탈취로 간주해 같은 로그인 family를 모두 폐기하고 재로그인을 요구합니다. 활성 family의 과거 token hash는 재사용 탐지를 위해 유지하고, family 절대 만료 7일 뒤에 함께 삭제합니다. 로그아웃(`POST /api/auth/logout`)은 해당 로그인 family를, 비밀번호 변경은 모든 family를 폐기하며 회원 탈퇴는 token과 family 데이터를 삭제합니다 — 다만 이미 발급된 Access Token은 무상태 JWT라 자체 만료 시각까지는 계속 유효하므로, 그 노출 창을 좁게 유지하는 것이 이 설계의 핵심입니다. 토큰 원문은 저장하지 않고 SHA-256 해시만 저장합니다.
 
 비밀번호 변경과 회원 탈퇴가 성공하면 별도 `audit_logs` 테이블에 내부 사용자 id·액션·시각만 기록합니다. 비밀번호·이메일·요청 본문은 남기지 않으며, 회원 탈퇴 뒤에도 이 최소 감사 기록은 보존됩니다. 현재 보존 기간은 정하지 않았으므로 실제 운영 전 법적 요구와 개인정보 처리방침에 맞춰 확정해야 합니다.
 
@@ -336,8 +336,8 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 | `GET` | `/api/auth/email-availability` | 이메일 사용 가능 여부 |
 | `POST` | `/api/auth/signup` | 회원가입 |
 | `POST` | `/api/auth/login` | Access Token(30분) + Refresh Token(14일) 발급 |
-| `POST` | `/api/auth/refresh` | Refresh Token 회전(rotate) — 재사용 탐지 시 전체 세션 폐기 |
-| `POST` | `/api/auth/logout` | 이 기기의 Refresh Token 폐기 |
+| `POST` | `/api/auth/refresh` | Refresh Token 회전(절대 만료는 연장 안 됨) — 재사용 탐지 시 로그인 family 폐기 |
+| `POST` | `/api/auth/logout` | 이 기기의 로그인 family 폐기 |
 | `GET` | `/api/auth/me` | 현재 로그인 사용자 |
 | `PATCH` | `/api/auth/password` | 비밀번호 변경 |
 | `DELETE` | `/api/auth/account` | 계정·자산·거래·Snapshot 영구 삭제 |

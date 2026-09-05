@@ -193,59 +193,66 @@ Refresh Token 재사용 탐지(`RefreshTokenService.rotate()`, §3-2)에서는 �
 
 ---
 
-## 3-2. Refresh Token 정리 작업 — 폐기해도 지우지는 않던 문제
+## 3-2. Refresh Token family 수명 분리 — 정리와 재사용 탐지를 함께 지키기
 
 ### 무엇을 했나
-`RefreshTokenService.rotate()`는 회전마다 이전 토큰의 `revokedAt`만 채우고 행 자체는 지우지 않는다(재사용 탐지가
-"이미 폐기된 토큰이 다시 왔는가"를 판정하려면 그 행이 남아 있어야 한다). 그런데 이 행을 지우는 코드가 어디에도
-없어서, 만료된 뒤로도 `refresh_tokens` 테이블에 **무기한** 쌓이고 있었다.
+최초 정리 작업은 개별 token의 `expiresAt + 7일`이 지나면 row를 삭제했다. 후속 리뷰에서 같은 family의 최신
+token이 계속 회전해 살아 있는 동안 과거 hash가 먼저 사라질 수 있고, 그 과거 토큰이 다시 오면 `familyId`를
+찾지 못해 최신 토큰을 폐기할 수 없다는 문제를 확인했다.
 
-만료 후 7일이 지난 행을 매일 자동 삭제하는 `@Scheduled` 작업을 추가했다.
+V12에서 `refresh_token_families` 테이블을 추가해 로그인 한 번에서 시작된 family의 `userId`, 발급 시각, 절대
+만료, 폐기 시각을 한 행으로 분리했다. 새 family의 절대 만료는 로그인 시점의 `refreshExpirationDays`(기본 14일)로
+한 번만 정하며, 회전된 모든 token은 같은 만료 시각을 공유한다. 회전은 값을 바꾸지만 세션의 절대 수명을
+연장하지 않는다.
 
-```java
-@Scheduled(fixedRate = 86_400_000)
-@Transactional
-public void evictExpiredTokens() {
-  Instant cutoff = Instant.now(clock).minus(EXPIRED_RETENTION_DAYS, ChronoUnit.DAYS);
-  repository.deleteAllByExpiresAtBefore(cutoff);
-}
-```
+정리 작업도 개별 token 만료가 아니라 **family 절대 만료 + 7일**을 기준으로 바꿨다. 대상 family의 token hash를
+먼저 모두 지운 뒤 family row를 지우므로, family가 살아 있는 동안에는 아무리 오래된 회전 토큰도 hash가 남아
+재사용 탐지에 쓰인다. 로그아웃은 제시한 token 하나가 아니라 그 로그인 family 전체를 폐기하며, 비밀번호 변경은
+기존처럼 사용자의 모든 family를 폐기한다. 회원 탈퇴는 token row를 먼저 지운 뒤 family 메타데이터도 삭제한다.
 
-### 왜 만료 즉시가 아니라 7일 유예를 두나
-`rotate()`의 판정 순서는 **폐기 여부를 만료 여부보다 먼저** 본다.
+기존 운영 데이터는 V12가 family별 `MIN(issued_at)`과 `MAX(expires_at)`으로 backfill한다. 가장 늦게 만료되는 현재
+token을 그대로 살려 배포 순간 강제 로그아웃을 만들지 않고, 활성 token이 하나도 없는 family만 폐기 상태로
+이관한다.
 
-```java
-if (existing.isRevoked()) { /* family 전체 폐기 — 탈취 신호 */ }
-if (existing.isExpired(now)) { /* 그냥 만료 */ }
-```
+### 왜 family가 살아 있는 동안 hash를 지우지 않나
+현재 Refresh Token은 family id를 포함하지 않는 opaque random 값이다. hash row를 삭제하면 나중에 같은 원문이
+와도 어느 family였는지 복구할 정보가 없다. family 상태 테이블만 추가한 채 개별 hash를 먼저 지우는 설계는 원래
+보안 구멍을 해결하지 못한다. 절대 만료 시각 이후에는 그 family의 최신 token도 더는 유효하지 않으므로, 그때
+hash와 family를 함께 지우면 재사용 탐지 기간과 저장량 상한이 일치한다.
 
-즉 이미 만료된 토큰이라도 그게 **폐기된** 토큰이면 재사용 탐지가 여전히 의미 있는 신호(탈취 시도)를 준다. 만료
-직후 바로 지우면 이 신호를 잃는다. 7일은 이 프로젝트의 Refresh Token 수명(기본 14일, `refreshExpirationDays`)의
-절반 정도를 유예로 준 임의의 값이다 — 탐지 가치와 무한정 쌓이는 문제 사이의 절충이다.
-
-다만 후속 리뷰에서 이 절충의 보안 경계를 더 정확히 확인했다. 같은 family가 계속 회전하면 최신 토큰은 살아
-있을 수 있는데, 7일 유예가 지난 과거 token row를 삭제하면 그 토큰 재사용 시 `familyId`를 더는 알아낼 수 없어
-최신 토큰까지 폐기하지 못한다. 따라서 "7일 뒤에는 탐지 신호가 의미 없다"거나 "정리가 재사용 탐지에 영향을 주지
-않는다"고 설명하면 안 된다. 토큰 row는 정리하되 family 상태·절대 만료를 별도 보존하는 구조가 후속 보완점이다.
+### 검토한 대안
+| 대안 | 왜 채택하지 않았나 |
+|---|---|
+| 개별 token 만료 + 7일 정리 유지 | 활성 family의 과거 hash가 먼저 사라져 재사용 시 현재 세션을 폐기할 수 없다 |
+| 보존 기간 숫자만 늘리기 | 구멍이 나타나는 시점만 늦출 뿐 sliding 회전이 계속되면 같은 문제가 반복된다 |
+| raw token에 family id 포함 | 삭제된 hash도 family에 연결할 수 있지만 토큰 형식 변경과 위조 family id 처리 정책이 추가된다 |
+| 회전마다 family 만료 연장 | 사용성은 좋지만 family와 과거 hash가 계속 살아 저장량 상한이 다시 사라진다 |
 
 ### 실제 확인 결과
-`@SpringBootTest` 통합 테스트로 실제 H2에 만료 10일 지난 토큰과 아직 유효한 토큰을 각각 저장하고
-`evictExpiredTokens()`를 호출했다.
+클래스 단위 `@Transactional`이 없는 통합 테스트로 예외 뒤 family 폐기와 정리 커밋을 확인했다.
 
 | 검증 | 결과 |
 |---|---|
-| 만료 10일 지난 토큰(유예 7일 초과) | 삭제됨 |
-| 아직 유효한 토큰 | 그대로 남음 |
+| 정상 회전 | raw token은 바뀌지만 새 token의 만료 시각은 최초 family 절대 만료와 동일 |
+| 폐기된 과거 token 재사용 | `INVALID_REFRESH_TOKEN`, family 폐기 상태가 예외 뒤에도 실제 커밋 |
+| family 폐기 뒤 최신 token 사용 | token 자체 상태와 무관하게 `INVALID_REFRESH_TOKEN` |
+| 과거 token은 만료됐지만 family는 활성 | 정리 작업 뒤에도 hash와 family 모두 보존 |
+| family 절대 만료 + 7일 경과 | 해당 family의 모든 token hash를 먼저 지우고 family row 삭제 |
+| V12 기존 데이터 backfill(MySQL 8.0) | 활성 token이 남은 family는 ACTIVE·최대 만료 유지, 전부 폐기된 family는 REVOKED로 이관 |
+
+실 서버에서도 로그인 → 정상 회전 → 첫 token 재사용 순서로 호출해 첫 token과 방금 받은 token이 모두
+`401 INVALID_REFRESH_TOKEN`이 되는지 확인했다. 별도 로그인 family는 로그아웃 후 재발급이 같은 401로 거부됐다.
 
 ### 실무자가 물어볼 만한 지점
-- **"멱등성 키 정리(§3-1)는 1시간마다인데 왜 이건 하루마다인가?"**
-  → 정리 주기는 유예 기간에 비해 충분히 촘촘하면 된다. 멱등성 키는 24시간 유예에 1시간 주기(유예의 1/24),
-  Refresh Token은 7일 유예에 1일 주기(유예의 1/7)로 비슷한 비율을 유지했다. Refresh Token 쪽은 애초에 유예가
-  길어서 그만큼 자주 돌 필요가 없다.
-- **"왜 진작 없었나?"**
-  → Refresh Token 회전 자체를 만들 때는 "탈취 탐지"에 집중했고, 정리는 별도 갭으로 `docs/PRODUCTION_READINESS.md`에
-  남겨뒀다가 우선순위 논의에서 골라 이번에 구현했다. 개인 MVP 규모에서는 테이블이 몇만 행을 넘기 전까지 성능
-  영향이 없어 급하지 않았다.
+- **"회전할 때마다 14일이 다시 시작되지 않나?"**
+  → 이제는 시작되지 않는다. 탈취된 세션이 회전만으로 무기한 연장되지 않게 로그인 시점부터 최대 14일로
+  제한한다. 계속 이용하려면 14일마다 비밀번호로 다시 로그인해야 한다.
+- **"왜 family 만료 뒤에도 7일 보존하나?"**
+  → 이미 모든 token이 사용할 수 없는 시점이라 활성 세션 보호에는 필요 없지만, 운영 중 만료·재사용 징후를
+  짧게 확인할 여유를 둔다. 정리 주기는 하루라 최대 약 하루 늦게 삭제될 수 있다.
+- **"재사용 탐지 예외가 family 폐기를 롤백하지 않나?"**
+  → `rotate()`는 `REQUIRES_NEW + noRollbackFor(BusinessException.class)`를 유지한다. 실제 커밋 경계 테스트에서
+  예외 응답 뒤에도 family row의 `revokedAt`과 최신 token 폐기가 남는지 확인했다.
 
 ---
 

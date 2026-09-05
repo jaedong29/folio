@@ -1,6 +1,7 @@
 package com.assetdashboard.global.security;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -28,7 +29,6 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
   void deleteAllByUserId(Long userId);
 
   @Modifying
-  @Transactional
-  @Query("delete from RefreshToken t where t.expiresAt < :cutoff")
-  int deleteAllByExpiresAtBefore(@Param("cutoff") Instant cutoff);
+  @Query("delete from RefreshToken t where t.familyId in :familyIds")
+  int deleteAllByFamilyIdIn(@Param("familyIds") List<String> familyIds);
 }

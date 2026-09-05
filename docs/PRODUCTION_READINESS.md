@@ -10,17 +10,17 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 |---|---|---|
 | CI | push·PR마다 `./gradlew clean test` + API 키 패턴 검사 자동 실행 | `.github/workflows/ci.yml` |
 | LLM 비용 거버넌스 | Financial Evidence Agent와 News 요약이 하루 호출 수·토큰 사용량 카운터를 공유, 초과 시 `429 AI_BUDGET_EXCEEDED`로 실제 호출 전에 차단 | `evidence/agent/LlmUsageBudgetService.java`, `GET /api/ai/usage/today` |
-| 인증 세션 관리 | Access Token 30분 + 회전·폐기되는 Refresh Token(SHA-256 해시 저장), 재사용 탐지 시 세션 전체 폐기, 로그아웃·비밀번호 변경·회원 탈퇴가 실제로 세션을 끊음 | `global/security/RefreshTokenService.java` |
+| 인증 세션 관리 | Access Token 30분 + 회전·폐기되는 Refresh Token(SHA-256 해시 저장). 로그인 family의 절대 수명은 기본 14일로 회전해도 연장되지 않고, 과거 token 재사용 시 family 전체 폐기. 로그아웃·비밀번호 변경·회원 탈퇴가 실제 세션과 family 데이터를 정리 | `global/security/RefreshTokenService.java`, `RefreshTokenFamily.java` |
 | 비밀 관리 | API 키·JWT Secret은 환경변수로만 주입, 코드·설정 파일에 저장하지 않음. `prod` 프로필은 `APP_JWT_SECRET` 없으면 기동 자체가 실패 | `application.yml`, `JwtTokenProvider.java` |
 | 데이터 삭제 | 회원 탈퇴 시 자산·거래·Snapshot·근거 문서·Agent Trace·평가 배치·Refresh Token까지 연쇄 삭제. 법적·운영 보존 정책이 필요한 내부 사용자 id·액션·시각의 최소 감사 기록만 별도 보존 | `UserAccountService.deleteAccount()` |
 | 인가 | 소유권 기반 404(리소스 존재 여부 비노출), `SecurityContext` 기반 `userId`만 신뢰, 신규 API는 기본적으로 인증 필요(명시적으로 연 경로만 예외) | `SecurityConfig.java` |
-| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V11`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
+| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V12`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
 | 백업 | AWS 스테이징용 백업·복구·검증 스크립트 존재(수동 실행) | `deploy/aws/backup.sh`, `restore.sh`, `verify-backup.sh` |
 | LLM 안전장치 | 숫자 조작·가격 인과·Prompt Injection·문장수·비정상 토큰을 규칙 기반으로 차단, 골든셋으로 회귀 검증 | `evidence/news/NewsAnswerGuardrail.java`, `news/NewsSummaryGuardrail.java` |
 | 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
 | 골든셋 Live 커버리지 확장 | fixture만으로 확장 가능한 4건(`stale-price`, `stale-fx`, `transaction-evidence`, `price-direction`)을 추가해 5개 → 9개로, 이어서 `searchSymbolEvidence` Agent Tool을 연결해 사용자 등록 근거 자료 7건을 추가해 9개 → 16개로 확장. 나머지 2개(`news-correlation`, `future-document`)는 멀티 Tool 체이닝·날짜 파싱이 필요해 포함하지 않음(아래 갭 참고) | `evidence/document/SymbolEvidenceService.java`, `SymbolEvidenceAnswerGuardrail.java`, `LiveEvaluationBatchQueueService.SUPPORTED_CASES` |
 | 거래 멱등성 키 | 매수·매도·입금·출금 4개 API가 공백이 아닌 1~255자의 `Idempotency-Key`를 필수로 받아 같은 요청을 한 번만 체결. DB unique 제약으로 경합을 막고, 완료 시 최초 `TransactionResponse` JSON을 같은 트랜잭션에 저장해 이후 자산 변경·거래 삭제와 무관하게 그대로 재생. 같은 키의 다른 본문은 `409 IDEMPOTENCY_KEY_REUSED`, 24시간 뒤 자동 만료 | `TransactionIdempotencyService.java`, `V9__idempotency_keys.sql`, `V11__idempotency_response_snapshot.sql` |
-| Refresh Token 정리 작업 | 만료된 지 7일 지난 Refresh Token 행을 매일 자동 삭제. 무기한 적재는 막았지만, 삭제한 과거 토큰을 통한 family 재사용 탐지는 더는 할 수 없어 아래 보안 보완점이 남음 | `global/security/RefreshTokenService.evictExpiredTokens()` |
+| Refresh Token family 수명·정리 | family 상태와 절대 만료를 별도 row로 관리하고 회전해도 기본 14일 한도를 연장하지 않음. 활성 family의 과거 token hash는 재사용 탐지를 위해 보존하고, family 절대 만료 7일 뒤 token과 family를 함께 삭제 | `RefreshTokenFamily.java`, `V12__refresh_token_families.sql`, `RefreshTokenService.evictExpiredTokens()` |
 | Graceful shutdown | SIGTERM 수신 시 새 요청을 받지 않고 진행 중인 요청을 최대 30초까지 기다린 뒤 종료. Docker 종료 유예는 35초로 두어 애플리케이션보다 먼저 SIGKILL하지 않게 함 | `application.yml`, `docker-compose.yml`, `deploy/aws/docker-compose.yml` |
 | 민감 액션 감사 로그 | 비밀번호 변경·회원 탈퇴 성공을 내부 사용자 id·액션·시각만 별도 append-only 테이블에 기록. 업무 변경과 같은 트랜잭션에 참여해 실패한 변경을 성공으로 기록하지 않고, users FK를 두지 않아 탈퇴 후에도 보존 | `global/audit`, `V10__audit_logs.sql`, `UserAccountService.java` |
 
@@ -33,7 +33,6 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 - **로그인 잠금·IP 제한이 메모리 상태다.** `LoginAttemptGuard`/`AuthRateLimitFilter` 둘 다 `ConcurrentHashMap`에 상태를 둔다. 단일 인스턴스에서는 문제없지만 인스턴스를 늘리면 인스턴스마다 카운터가 따로 놀아 우회가 쉬워진다 — Redis 같은 공유 저장소로 옮겨야 한다. **지금은 단일 인스턴스 MVP라 별도 인프라 없이 바로 동작하는 쪽을 택했다.**
 - **회원가입·이메일 중복확인에는 이메일 단위 잠금이 없다.** IP 단위 전역 제한(`AuthRateLimitFilter`)은 걸리지만, 특정 이메일을 겨냥한 시도를 막는 장치는 로그인에만 있다.
 - **Secrets가 환경변수뿐이다.** AWS Secrets Manager, Vault 같은 별도 비밀 관리 시스템 연동이 없다. **단일 인스턴스 개인 배포 규모에서는 환경변수로 충분해서다.**
-- **Refresh Token 정리가 재사용 탐지 기간도 7일로 줄인다.** 계속 회전 중인 family의 최신 토큰이 살아 있어도 삭제된 과거 토큰이 다시 오면 `familyId`를 복구할 수 없어 family 전체를 폐기하지 못한다. 토큰 hash row와 별도로 family 상태·절대 만료를 보존한 뒤에야 저장량과 재사용 탐지를 함께 해결할 수 있다.
 - **CORS 정책이 명시돼 있지 않다.** 지금은 정적 리소스와 API가 같은 origin에서 서빙되어 필요 없지만, 프런트엔드를 분리 배포하면 그때 반드시 설정해야 한다.
 
 ### 신뢰성 · 장애 대응
@@ -55,9 +54,8 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 ## 지금부터 순서대로 하나만 고른다면
 
-1. **Refresh Token family 수명 모델 분리.** 개별 token hash는 정리하되 family의 폐기 상태와 절대 만료는 별도 row에 남겨, 오래된 회전 토큰 재사용도 현재 family 폐기로 이어지게 한다. 보안 의미가 달라지는 변경이라 7일 숫자만 늘리는 임시처방은 피한다.
-2. **감사·Agent Trace·평가 기록의 보존 기간 확정.** 감사 로그를 만들었으므로 무기한 보존을 그대로 두지 말고, 실제 운영 정책과 개인정보 처리방침을 기준으로 기간·접근권한·삭제 작업을 정한다.
-3. **외부 API Circuit Breaker와 source별 재시도.** 단일 인스턴스에서도 Yahoo/Binance/Upbit/NIM 장애 전파를 줄이는 실효가 있다. retry 가능한 오류와 즉시 실패할 오류를 먼저 분리한 뒤 도입한다.
+1. **감사·Agent Trace·평가 기록의 보존 기간 확정.** 감사 로그를 만들었으므로 무기한 보존을 그대로 두지 말고, 실제 운영 정책과 개인정보 처리방침을 기준으로 기간·접근권한·삭제 작업을 정한다.
+2. **외부 API Circuit Breaker와 source별 재시도.** 단일 인스턴스에서도 Yahoo/Binance/Upbit/NIM 장애 전파를 줄이는 실효가 있다. retry 가능한 오류와 즉시 실패할 오류를 먼저 분리한 뒤 도입한다.
 
 CI의 `actions/setup-java@v5` 전환은 실제 GitHub 실행에 성공해 현재 기능 문제는 없다. 다만 2026-09-05 기준
 공식 최신 안정판은 v6이고 `actions/checkout`, `gradle/actions/setup-gradle`도 새 major가 있으므로, 위 정합성·보안

@@ -27,7 +27,6 @@ import com.assetdashboard.global.audit.AuditAction;
 import com.assetdashboard.global.audit.AuditLogService;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
-import com.assetdashboard.global.security.RefreshTokenRepository;
 import com.assetdashboard.global.security.RefreshTokenService;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,7 +51,6 @@ class UserAccountServiceTest {
   @Mock private AgentEvaluationRecordRepository agentEvaluationRecordRepository;
   @Mock private LiveEvaluationBatchJobRepository liveEvaluationBatchJobRepository;
   @Mock private LiveEvaluationBatchCaseRepository liveEvaluationBatchCaseRepository;
-  @Mock private RefreshTokenRepository refreshTokenRepository;
   @Mock private RefreshTokenService refreshTokenService;
   @Mock private IdempotencyKeyRepository idempotencyKeyRepository;
   @Mock private AuditLogService auditLogService;
@@ -76,7 +74,6 @@ class UserAccountServiceTest {
             agentEvaluationRecordRepository,
             liveEvaluationBatchJobRepository,
             liveEvaluationBatchCaseRepository,
-            refreshTokenRepository,
             refreshTokenService,
             idempotencyKeyRepository,
             auditLogService,
@@ -134,6 +131,7 @@ class UserAccountServiceTest {
             agentTraceSpanRepository,
             agentTraceRunRepository,
             evidenceDocumentRepository,
+            refreshTokenService,
             transactionRepository,
             assetRepository,
             portfolioSnapshotRepository,
@@ -144,6 +142,7 @@ class UserAccountServiceTest {
     deletionOrder.verify(agentTraceSpanRepository).deleteAllByRunIdIn(List.of(31L));
     deletionOrder.verify(agentTraceRunRepository).deleteAllByUserId(7L);
     deletionOrder.verify(evidenceDocumentRepository).deleteAllByUserId(7L);
+    deletionOrder.verify(refreshTokenService).deleteAllForUser(7L);
     deletionOrder.verify(transactionRepository).deleteAllByAssetIdIn(List.of(11L));
     deletionOrder.verify(assetRepository).deleteAllByIdInBatch(List.of(11L));
     deletionOrder.verify(portfolioSnapshotRepository).deleteAllByUserId(7L);

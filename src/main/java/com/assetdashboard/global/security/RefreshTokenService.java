@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,17 +33,22 @@ public class RefreshTokenService {
 
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-  // 만료된 토큰도 재사용 탐지(rotate()가 revoked 여부를 expired보다 먼저 검사)에 잠시 쓰일 수 있어 바로
-  // 지우지 않는다. 만료 후 이 기간이 지나면 그 신호도 의미가 없어지므로 그때 정리한다.
-  private static final long EXPIRED_RETENTION_DAYS = 7;
+  // family 절대 만료 뒤에도 운영 확인을 위해 잠시 보존한 후 token hash와 family를 함께 정리한다.
+  private static final long FAMILY_RETENTION_DAYS = 7;
 
   private final RefreshTokenRepository repository;
+  private final RefreshTokenFamilyRepository familyRepository;
   private final JwtProperties properties;
   private final Clock clock;
 
   @Transactional
   public IssuedRefreshToken issue(Long userId) {
-    return issue(userId, UUID.randomUUID().toString());
+    Instant now = Instant.now(clock);
+    Instant expiresAt = now.plus(properties.refreshExpirationDays(), ChronoUnit.DAYS);
+    RefreshTokenFamily family =
+        RefreshTokenFamily.issue(UUID.randomUUID().toString(), userId, now, expiresAt);
+    familyRepository.save(family);
+    return issueToken(family, now);
   }
 
   // 재사용 탐지 시 family 전체를 폐기한 뒤 예외를 던진다. 이 메서드를 호출하는 UserService.refresh()도
@@ -55,56 +61,89 @@ public class RefreshTokenService {
         repository
             .findByTokenHash(hash(rawToken))
             .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+    RefreshTokenFamily family =
+        familyRepository
+            .findById(existing.getFamilyId())
+            .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
     Instant now = Instant.now(clock);
 
-    if (existing.isRevoked()) {
+    if (existing.isRevoked() || family.isRevoked()) {
       log.warn(
           "[RefreshToken] 이미 폐기된 토큰이 재사용됐습니다. familyId={} — family 전체를 폐기합니다.",
           existing.getFamilyId());
+      family.revoke(now);
       repository.revokeAllByFamilyId(existing.getFamilyId(), now);
       throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
     }
-    if (existing.isExpired(now)) {
+    if (existing.isExpired(now) || family.isExpired(now)) {
       throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
     }
 
     existing.revoke(now);
-    IssuedRefreshToken next = issue(existing.getUserId(), existing.getFamilyId());
+    IssuedRefreshToken next = issueToken(family, now);
     return new RefreshTokenRotation(existing.getUserId(), next);
   }
 
   @Transactional
   public void revoke(String rawToken) {
-    repository.findByTokenHash(hash(rawToken)).ifPresent(t -> t.revoke(Instant.now(clock)));
+    repository
+        .findByTokenHash(hash(rawToken))
+        .ifPresent(
+            token -> {
+              Instant now = Instant.now(clock);
+              token.revoke(now);
+              familyRepository.findById(token.getFamilyId()).ifPresent(family -> family.revoke(now));
+              repository.revokeAllByFamilyId(token.getFamilyId(), now);
+            });
   }
 
   /** 비밀번호 변경·회원 탈퇴처럼 다른 모든 세션을 강제로 끊어야 할 때 쓴다. */
   @Transactional
   public void revokeAllForUser(Long userId) {
-    repository.revokeAllByUserId(userId, Instant.now(clock));
+    Instant now = Instant.now(clock);
+    familyRepository.revokeAllByUserId(userId, now);
+    repository.revokeAllByUserId(userId, now);
   }
 
   /**
-   * 만료된 지 오래된 토큰을 지운다.
+   * 절대 만료된 지 오래된 family와 그 token hash들을 함께 지운다.
    *
-   * <p>삭제한 토큰으로는 이후 family 재사용 탐지를 할 수 없으므로, 현재 7일은 저장량과 탐지 기간 사이의 절충이다.
+   * <p>개별 token의 만료 시각만 보고 지우면 같은 family의 최신 token이 살아 있는 동안 과거 token의 재사용을
+   * 탐지하지 못한다. 따라서 활성 family의 token hash는 모두 유지하고, family 절대 만료 뒤에만 일괄 정리한다.
    */
   @Scheduled(fixedRate = 86_400_000)
   @Transactional
   public void evictExpiredTokens() {
-    Instant cutoff = Instant.now(clock).minus(EXPIRED_RETENTION_DAYS, ChronoUnit.DAYS);
-    int deleted = repository.deleteAllByExpiresAtBefore(cutoff);
-    if (deleted > 0) {
-      log.info("[RefreshToken] 만료 후 {}일 지난 토큰 {}건을 정리했습니다.", EXPIRED_RETENTION_DAYS, deleted);
+    Instant cutoff = Instant.now(clock).minus(FAMILY_RETENTION_DAYS, ChronoUnit.DAYS);
+    List<String> expiredFamilyIds = familyRepository.findIdsByExpiresAtBefore(cutoff);
+    if (!expiredFamilyIds.isEmpty()) {
+      int deletedTokens = repository.deleteAllByFamilyIdIn(expiredFamilyIds);
+      int deletedFamilies = familyRepository.deleteAllByFamilyIdIn(expiredFamilyIds);
+      log.info(
+          "[RefreshToken] 절대 만료 후 {}일 지난 family {}건과 token {}건을 정리했습니다.",
+          FAMILY_RETENTION_DAYS,
+          deletedFamilies,
+          deletedTokens);
     }
   }
 
-  private IssuedRefreshToken issue(Long userId, String familyId) {
+  /** 회원 탈퇴 시 token을 먼저 지우고 family 메타데이터까지 제거한다. */
+  @Transactional
+  public void deleteAllForUser(Long userId) {
+    repository.deleteAllByUserId(userId);
+    familyRepository.deleteAllByUserId(userId);
+  }
+
+  private IssuedRefreshToken issueToken(RefreshTokenFamily family, Instant now) {
     String raw = generateToken();
-    Instant now = Instant.now(clock);
-    Instant expiresAt = now.plus(properties.refreshExpirationDays(), ChronoUnit.DAYS);
-    repository.save(RefreshToken.issue(userId, familyId, hash(raw), now, expiresAt));
-    return new IssuedRefreshToken(raw, expiresAt);
+    repository.save(
+        RefreshToken.issue(
+            family.getUserId(),
+            family.getFamilyId(),
+            hash(raw),
+            now,
+            family.getExpiresAt()));
+    return new IssuedRefreshToken(raw, family.getExpiresAt());
   }
 
   private String generateToken() {
