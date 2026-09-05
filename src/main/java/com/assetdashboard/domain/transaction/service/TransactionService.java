@@ -85,7 +85,7 @@ public class TransactionService {
             request.memo(),
             request.tradedAt());
     TransactionResponse response = applyTrade(asset, settlementAsset, tx);
-    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    idempotencyService.complete(userId, idempotencyKey, response);
     return response;
   }
 
@@ -127,7 +127,7 @@ public class TransactionService {
             request.memo(),
             request.tradedAt());
     TransactionResponse response = applyTrade(asset, settlementAsset, tx);
-    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    idempotencyService.complete(userId, idempotencyKey, response);
     return response;
   }
 
@@ -159,7 +159,7 @@ public class TransactionService {
         Transaction.createDeposit(
             assetId, request.quantity(), exchangeRate, request.memo(), request.tradedAt());
     TransactionResponse response = apply(asset, tx);
-    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    idempotencyService.complete(userId, idempotencyKey, response);
     return response;
   }
 
@@ -191,7 +191,7 @@ public class TransactionService {
         Transaction.createWithdraw(
             assetId, request.quantity(), exchangeRate, request.memo(), request.tradedAt());
     TransactionResponse response = apply(asset, tx);
-    idempotencyService.complete(userId, idempotencyKey, response.transactionId());
+    idempotencyService.complete(userId, idempotencyKey, response);
     return response;
   }
 

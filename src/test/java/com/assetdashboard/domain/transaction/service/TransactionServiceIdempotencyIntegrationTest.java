@@ -59,12 +59,54 @@ class TransactionServiceIdempotencyIntegrationTest {
     TransactionResponse second =
         transactionService.buy(fixture.userId(), fixture.assetId(), request, idempotencyKey);
 
-    assertThat(second.transactionId()).isEqualTo(first.transactionId());
+    assertThat(second).isEqualTo(first);
     assertThat(
             transactionRepository.findAllByAssetIdOrderByTradedAtAscIdAsc(fixture.assetId()))
         .hasSize(1);
     assertThat(assetRepository.findById(fixture.assetId()).orElseThrow().getQuantity())
         .isEqualByComparingTo(BigDecimal.ONE);
+  }
+
+  @Test
+  void retryReturnsTheFirstResponseEvenAfterAnotherTransactionChangesTheAsset() {
+    Fixture fixture = setUpUserWithAssets();
+    TradeRequest request = tradeRequest(fixture.settlementId());
+    String firstKey = "integration-key-" + UUID.randomUUID();
+
+    TransactionResponse first =
+        transactionService.buy(fixture.userId(), fixture.assetId(), request, firstKey);
+    transactionService.buy(
+        fixture.userId(),
+        fixture.assetId(),
+        request,
+        "integration-key-" + UUID.randomUUID());
+    TransactionResponse retry =
+        transactionService.buy(fixture.userId(), fixture.assetId(), request, firstKey);
+
+    assertThat(retry).isEqualTo(first);
+    assertThat(retry.asset().quantity()).isEqualByComparingTo(BigDecimal.ONE);
+    assertThat(assetRepository.findById(fixture.assetId()).orElseThrow().getQuantity())
+        .isEqualByComparingTo(new BigDecimal("2"));
+  }
+
+  @Test
+  void retryReturnsTheFirstResponseEvenAfterTheTransactionIsDeleted() {
+    Fixture fixture = setUpUserWithAssets();
+    TradeRequest request = tradeRequest(fixture.settlementId());
+    String idempotencyKey = "integration-key-" + UUID.randomUUID();
+
+    TransactionResponse first =
+        transactionService.buy(fixture.userId(), fixture.assetId(), request, idempotencyKey);
+    transactionService.delete(fixture.userId(), fixture.assetId(), first.transactionId());
+    TransactionResponse retry =
+        transactionService.buy(fixture.userId(), fixture.assetId(), request, idempotencyKey);
+
+    assertThat(retry).isEqualTo(first);
+    assertThat(
+            transactionRepository.findAllByAssetIdOrderByTradedAtAscIdAsc(fixture.assetId()))
+        .isEmpty();
+    assertThat(assetRepository.findById(fixture.assetId()).orElseThrow().getQuantity())
+        .isEqualByComparingTo(BigDecimal.ZERO);
   }
 
   @Test

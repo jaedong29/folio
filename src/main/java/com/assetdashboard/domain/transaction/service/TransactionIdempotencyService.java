@@ -9,6 +9,8 @@ import com.assetdashboard.domain.transaction.repository.IdempotencyKeyRepository
 import com.assetdashboard.domain.transaction.repository.TransactionRepository;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -40,6 +42,7 @@ public class TransactionIdempotencyService {
   private final TransactionRepository transactionRepository;
   private final AssetService assetService;
   private final Clock clock;
+  private final ObjectMapper objectMapper;
 
   /**
    * 같은 요청이 이미 완료됐으면 그 결과를 돌려주고, 처음 보는 요청이면 claim만 남기고 빈 값을 돌려준다.
@@ -60,6 +63,10 @@ public class TransactionIdempotencyService {
       if (record.getResultTransactionId() == null) {
         throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_IN_PROGRESS);
       }
+      if (record.getResultResponseJson() != null) {
+        return Optional.of(deserializeResponse(record.getResultResponseJson()));
+      }
+      // V11 배포 전에 완료된 키는 JSON이 없으므로, 24시간 전환 기간에만 기존 재구성 경로를 쓴다.
       return Optional.of(rebuildResponse(userId, record.getResultTransactionId()));
     }
     try {
@@ -72,10 +79,12 @@ public class TransactionIdempotencyService {
   }
 
   @Transactional
-  public void complete(Long userId, String idempotencyKey, Long transactionId) {
-    repository
-        .findByUserIdAndIdempotencyKey(userId, idempotencyKey)
-        .ifPresent(record -> record.complete(transactionId));
+  public void complete(Long userId, String idempotencyKey, TransactionResponse response) {
+    IdempotencyKey record =
+        repository
+            .findByUserIdAndIdempotencyKey(userId, idempotencyKey)
+            .orElseThrow(() -> new IllegalStateException("멱등성 claim 없이 거래를 완료할 수 없습니다."));
+    record.complete(response.transactionId(), serializeResponse(response));
   }
 
   /** 연산 종류·자산·요청 필드가 하나라도 다르면 다른 fingerprint가 나오도록 한다. */
@@ -102,5 +111,21 @@ public class TransactionIdempotencyService {
             .orElseThrow(() -> new BusinessException(ErrorCode.TRANSACTION_NOT_FOUND));
     Asset asset = assetService.getOwnedAsset(userId, tx.getAssetId());
     return TransactionResponse.from(tx, asset);
+  }
+
+  private String serializeResponse(TransactionResponse response) {
+    try {
+      return objectMapper.writeValueAsString(response);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("멱등성 응답을 저장할 수 없습니다.", e);
+    }
+  }
+
+  private TransactionResponse deserializeResponse(String responseJson) {
+    try {
+      return objectMapper.readValue(responseJson, TransactionResponse.class);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("저장된 멱등성 응답을 읽을 수 없습니다.", e);
+    }
   }
 }

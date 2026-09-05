@@ -17,7 +17,8 @@ import lombok.NoArgsConstructor;
  *
  * <p>같은 사용자가 같은 {@code idempotencyKey}로 다시 요청하면, 원래 거래를 다시 만들지 않고 그 결과를 그대로
  * 돌려준다. {@code requestFingerprint}는 같은 키가 다른 요청 내용에 잘못 재사용되는 것을 감지한다.
- * {@code resultTransactionId}가 아직 null이면 같은 요청이 동시에 처리 중이라는 뜻이다.
+ * {@code resultTransactionId}가 아직 null이면 같은 요청이 동시에 처리 중이라는 뜻이다. 완료 시점의 응답 JSON도
+ * 함께 저장해 이후 Asset 상태가 바뀌거나 거래가 삭제돼도 최초 응답을 그대로 재생한다.
  */
 @Getter
 @Entity
@@ -46,6 +47,9 @@ public class IdempotencyKey extends BaseCreatedEntity {
   @Column(name = "result_transaction_id")
   private Long resultTransactionId;
 
+  @Column(name = "result_response_json", columnDefinition = "TEXT")
+  private String resultResponseJson;
+
   private IdempotencyKey(Long userId, String idempotencyKey, String requestFingerprint) {
     this.userId = userId;
     this.idempotencyKey = idempotencyKey;
@@ -60,7 +64,8 @@ public class IdempotencyKey extends BaseCreatedEntity {
     return this.requestFingerprint.equals(otherFingerprint);
   }
 
-  public void complete(Long transactionId) {
+  public void complete(Long transactionId, String responseJson) {
     this.resultTransactionId = transactionId;
+    this.resultResponseJson = responseJson;
   }
 }

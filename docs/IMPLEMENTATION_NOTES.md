@@ -130,11 +130,18 @@ private TransactionResponse apply(Asset asset, Transaction tx) {
 2. 없으면 → claim 시도(INSERT). 유니크 제약 위반이면 동시 요청 경합 → 409 IDEMPOTENCY_KEY_IN_PROGRESS
 3. 있고 요청 fingerprint가 다르면 → 409 IDEMPOTENCY_KEY_REUSED (다른 요청에 같은 키 재사용)
 4. 있고 아직 완료 안 됐으면(진행 중 요청이 있음) → 409 IDEMPOTENCY_KEY_IN_PROGRESS
-5. 있고 완료됐으면 → 그때 저장한 transactionId와 현재 Asset 상태로 응답을 재구성(재실행 없음)
+5. 있고 완료됐으면 → 완료 시 저장한 `TransactionResponse` JSON을 역직렬화해 최초 응답 그대로 반환(재실행 없음)
 ```
 
 fingerprint는 `(operation, assetId, request 직렬화)`의 SHA-256이라, 같은 키라도 요청 내용이 다르면 재사용으로
-간주해 거부한다. 24시간 지난 키는 `@Scheduled` 작업이 매시간 정리한다.
+간주해 거부한다. 키는 공백이 아닌 1~255자만 컨트롤러 입구에서 허용하고, 24시간 지난 키는 `@Scheduled`
+작업이 매시간 정리한다.
+
+후속 리뷰에서 최초 구현이 `result_transaction_id`만 보관해, 그 사이 다른 거래가 있으면 재시도 응답의 Asset
+snapshot이 현재 값으로 바뀌는 문제를 확인했다. V11에서 nullable `result_response_json`을 추가하고 거래·claim·응답
+저장을 같은 트랜잭션으로 커밋하도록 보완했다. V11 이전에 생성된 완료 row는 최대 24시간의 보존 기간 동안 JSON이
+null일 수 있으므로 기존 재구성 경로를 임시 호환 경로로 유지한다. 이를 일괄 삭제하면 배포 직후의 정상 재시도가
+중복 체결될 수 있어 선택하지 않았다.
 
 ### 왜 낙관적 락만으로는 부족한가
 `@Version`은 **서로 다른** 요청끼리의 경합만 막는다. 네트워크 재시도나 버튼 중복 클릭으로 **같은** 요청이 두 번
@@ -155,20 +162,15 @@ Refresh Token 재사용 탐지(`RefreshTokenService.rotate()`, §3-2)에서는 �
 | 검증 | 결과 |
 |---|---|
 | 같은 키로 재시도 | 두 응답의 `transactionId` 동일, 거래 row 1건만 생성 |
+| 중간에 다른 거래 후 첫 키 재시도 | 최초 `TransactionResponse` 전체와 동일, 현재 Asset 수량과 섞이지 않음 |
+| 최초 거래 삭제 후 같은 키 재시도 | 거래를 다시 만들지 않고 삭제 전 최초 응답을 그대로 반환 |
 | 같은 키 + 다른 요청 본문 | `409 IDEMPOTENCY_KEY_REUSED`, 거래 row 추가 생성 안 됨 |
 | 서로 다른 키 + 같은 요청 본문 | 둘 다 정상 실행, 거래 row 2건, 수량 2배 — 의도된 별개 거래까지 막지는 않음 |
+| 공백·256자 키 | 컨트롤러에서 `400 INVALID_INPUT`, DB 예외·경합 오류로 내려가지 않음 |
 
-후속 리뷰에서 **중복 체결 방지는 되지만 응답 전체가 고정되지는 않는다**는 한계를 확인했다. 첫 입금 응답의 자산
-수량이 100이었어도 다른 입금으로 현재 수량이 150이 된 뒤 첫 키를 재시도하면, 같은 `transactionId`와 현재 수량
-150이 함께 반환된다. `idempotency_keys`에는 응답 snapshot이 아니라 `result_transaction_id`만 저장하기 때문이다.
-따라서 현재 계약은 "한 번만 실행"에는 맞지만 문서에서 말한 "첫 응답 그대로"에는 못 미친다.
-
-또 `Idempotency-Key`의 길이·공백 검증이 컨트롤러에 없어 256자 키가 DB 길이 제약에서 실패한 뒤
-`DataIntegrityViolationException` catch에 잡혀 `409 IDEMPOTENCY_KEY_IN_PROGRESS`로 잘못 응답하는 것도 실 서버로
-재현했다. 두 항목은 `docs/PRODUCTION_READINESS.md`의 최우선 보완점으로 다시 올렸다.
-
-실 서버 기동 후 curl로도 재현했다: 헤더 없이 요청하면 `400 IDEMPOTENCY_KEY_REQUIRED`, 같은 키로 두 번 보내면
-잔액이 한 번만 반영되고 두 응답의 `transactionId`가 같다.
+클래스 단위 `@Transactional`이 없는 통합 테스트로 위 커밋 경계를 검증했고, 실 서버에서도 첫 입금 → 다른 입금
+→ 첫 키 재시도를 순서대로 보내 최초 응답 JSON 전체가 같고 실제 잔액은 두 거래만 반영되는지 확인했다. 헤더 없이
+보내면 `400 IDEMPOTENCY_KEY_REQUIRED`, 256자 키를 보내면 `400 INVALID_INPUT`이다.
 
 ### 실무자가 물어볼 만한 지점
 - **"멱등성 키가 없으면 정말 막을 방법이 없나?"**
@@ -179,8 +181,11 @@ Refresh Token 재사용 탐지(`RefreshTokenService.rotate()`, §3-2)에서는 �
   프론트는 폼을 열 때 `crypto.randomUUID()`로 키를 하나 만들어 그 폼 세션 동안(에러 후 재시도 포함) 재사용하고,
   폼을 다시 열면 새 키를 만든다.
 - **"재시도 응답도 최초 응답과 완전히 같은가?"**
-  → 현재는 아니다. 거래 id와 거래 필드는 같지만 Asset snapshot은 재시도 시점의 현재 상태다. 응답 전체를
-  직렬화해 저장하거나 별도 결과 snapshot 컬럼을 두기 전까지는 "동일 응답"이라고 설명하면 안 된다.
+  → V11 이후 요청은 그렇다. 최초 `TransactionResponse`를 JSON으로 저장하고 그대로 읽으므로 이후 Asset 변경이나
+  거래 삭제와 무관하다. V11 이전 완료 row만 최대 24시간 동안 기존 재구성 경로를 사용한다.
+- **"응답 JSON 저장이 실패하면 거래만 커밋될 수 있나?"**
+  → 없다. 직렬화와 완료 기록은 거래 트랜잭션 안에서 실행되며 실패하면 거래·claim도 함께 롤백된다. claim이
+  사라진 비정상 상태도 조용히 무시하지 않고 예외를 내 전체 트랜잭션을 실패시킨다.
 - **"다중 인스턴스에서도 안전한가?"**
   → 그렇다. claim은 DB unique 제약(INSERT 경합 시 `DataIntegrityViolationException`)에 의존하지 인메모리 상태를
   쓰지 않는다 — `docs/PRODUCTION_READINESS.md`의 "단일 인스턴스 메모리 상태" 갭(로그인 잠금 등)과 달리 별도

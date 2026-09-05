@@ -188,7 +188,7 @@ Access Token은 탈취돼도 피해가 작도록 짧게 유지합니다(기본 3
 
 정산 연동 이후 BTC와 ETH를 동시에 매수해도 같은 사용자의 USDT 대기자금에서 충돌할 수 있습니다. 다만 이 서비스는 개인이 거래를 수동 기록하는 MVP이고 대기자금도 사용자별·통화별로 분리되어 있어, 충돌을 기다리게 하는 비관적 락보다 저동시성에 적합한 낙관적 락을 유지했습니다.
 
-낙관적 락은 서로 다른 요청끼리의 경합만 막을 뿐, 네트워크 재시도나 버튼 중복 클릭처럼 "같은" 요청이 두 번 도착하는 상황은 막지 못합니다. 매수·매도·입금·출금 4개 API는 `Idempotency-Key` 헤더를 필수로 받아, 같은 키로 다시 들어온 요청은 실행하지 않고 첫 응답을 그대로 돌려줍니다(`idempotency_keys` 테이블, `(user_id, idempotency_key)` unique 제약으로 동시 요청의 경합도 방지). 같은 키에 요청 내용이 다르면 `409 IDEMPOTENCY_KEY_REUSED`로 거부합니다. 키는 24시간 뒤 자동 삭제됩니다.
+낙관적 락은 서로 다른 요청끼리의 경합만 막을 뿐, 네트워크 재시도나 버튼 중복 클릭처럼 "같은" 요청이 두 번 도착하는 상황은 막지 못합니다. 매수·매도·입금·출금 4개 API는 공백이 아닌 1~255자의 `Idempotency-Key` 헤더를 필수로 받아, 같은 키로 다시 들어온 요청은 실행하지 않고 같은 트랜잭션에 저장한 첫 응답 JSON을 그대로 돌려줍니다(`idempotency_keys` 테이블, `(user_id, idempotency_key)` unique 제약으로 동시 요청의 경합도 방지). 같은 키에 요청 내용이 다르면 `409 IDEMPOTENCY_KEY_REUSED`로 거부합니다. 키는 24시간 뒤 자동 삭제됩니다.
 
 ### 9. 사용자 심볼과 외부 조회 심볼을 분리했습니다
 
@@ -349,10 +349,10 @@ APP_PRICE_EXTERNAL_ENABLED=false ./gradlew bootRun
 | `PATCH` | `/api/assets/{id}/quantity` | opening position 보유 수량 정정 |
 | `PATCH` | `/api/assets/{id}/price` | 현재가 수동 보정 |
 | `PATCH` | `/api/assets/{id}/exchange-rate` | 현재 환율 수동 보정 |
-| `POST` | `/api/assets/{id}/transactions/buy` | 매수와 대기자금 차감 (`Idempotency-Key` 헤더 필수) |
-| `POST` | `/api/assets/{id}/transactions/sell` | 매도와 대기자금 입금 (`Idempotency-Key` 헤더 필수) |
-| `POST` | `/api/assets/{id}/transactions/deposit` | 외부 입금 (`Idempotency-Key` 헤더 필수) |
-| `POST` | `/api/assets/{id}/transactions/withdraw` | 외부 출금 (`Idempotency-Key` 헤더 필수) |
+| `POST` | `/api/assets/{id}/transactions/buy` | 매수와 대기자금 차감 (`Idempotency-Key`: 공백 아닌 1~255자) |
+| `POST` | `/api/assets/{id}/transactions/sell` | 매도와 대기자금 입금 (`Idempotency-Key`: 공백 아닌 1~255자) |
+| `POST` | `/api/assets/{id}/transactions/deposit` | 외부 입금 (`Idempotency-Key`: 공백 아닌 1~255자) |
+| `POST` | `/api/assets/{id}/transactions/withdraw` | 외부 출금 (`Idempotency-Key`: 공백 아닌 1~255자) |
 | `DELETE` | `/api/assets/{id}/transactions/{txId}` | 거래 삭제 후 replay·정산 복구 |
 | `GET` | `/api/ai/evidence/assets/{id}` | 계산 입력·공식·누락 경고·최근 거래 근거 |
 | `GET` | `/api/ai/evidence/assets/{id}/price-trend` | 최근 일별 가격·변화율·방향 판정 근거 |

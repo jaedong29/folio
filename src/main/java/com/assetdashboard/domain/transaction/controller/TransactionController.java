@@ -9,10 +9,13 @@ import com.assetdashboard.global.security.CurrentUserId;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/assets/{assetId}/transactions")
 @RequiredArgsConstructor
+@Validated
 public class TransactionController {
 
   private final TransactionService transactionService;
@@ -55,7 +59,10 @@ public class TransactionController {
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
       @Valid @RequestBody TradeRequest request,
-      @RequestHeader("Idempotency-Key") String idempotencyKey) {
+      @RequestHeader("Idempotency-Key")
+          @NotBlank(message = "Idempotency-Key는 공백일 수 없습니다.")
+          @Size(max = 255, message = "Idempotency-Key는 255자를 넘을 수 없습니다.")
+          String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(transactionService.buy(userId, assetId, request, idempotencyKey));
   }
@@ -77,7 +84,10 @@ public class TransactionController {
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
       @Valid @RequestBody TradeRequest request,
-      @RequestHeader("Idempotency-Key") String idempotencyKey) {
+      @RequestHeader("Idempotency-Key")
+          @NotBlank(message = "Idempotency-Key는 공백일 수 없습니다.")
+          @Size(max = 255, message = "Idempotency-Key는 255자를 넘을 수 없습니다.")
+          String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(transactionService.sell(userId, assetId, request, idempotencyKey));
   }
@@ -98,7 +108,10 @@ public class TransactionController {
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
       @Valid @RequestBody CashFlowRequest request,
-      @RequestHeader("Idempotency-Key") String idempotencyKey) {
+      @RequestHeader("Idempotency-Key")
+          @NotBlank(message = "Idempotency-Key는 공백일 수 없습니다.")
+          @Size(max = 255, message = "Idempotency-Key는 255자를 넘을 수 없습니다.")
+          String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(transactionService.deposit(userId, assetId, request, idempotencyKey));
   }
@@ -120,7 +133,10 @@ public class TransactionController {
       @CurrentUserId Long userId,
       @PathVariable Long assetId,
       @Valid @RequestBody CashFlowRequest request,
-      @RequestHeader("Idempotency-Key") String idempotencyKey) {
+      @RequestHeader("Idempotency-Key")
+          @NotBlank(message = "Idempotency-Key는 공백일 수 없습니다.")
+          @Size(max = 255, message = "Idempotency-Key는 255자를 넘을 수 없습니다.")
+          String idempotencyKey) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(transactionService.withdraw(userId, assetId, request, idempotencyKey));
   }
