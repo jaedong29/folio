@@ -51,6 +51,22 @@ class RefreshTokenServiceTest {
   }
 
   @Test
+  void issueNormalizesExpirationToDatabaseMicrosecondPrecision() {
+    Clock nanosecondClock =
+        Clock.fixed(Instant.parse("2026-09-05T00:00:00.123456789Z"), ZoneOffset.UTC);
+    RefreshTokenService highPrecisionService =
+        new RefreshTokenService(
+            repository,
+            familyRepository,
+            new JwtProperties("test-secret", 30, 14),
+            nanosecondClock);
+
+    IssuedRefreshToken issued = highPrecisionService.issue(7L);
+
+    assertThat(issued.expiresAt()).isEqualTo(Instant.parse("2026-09-19T00:00:00.123456Z"));
+  }
+
+  @Test
   void rotateRevokesOldTokenAndIssuesNewOneInSameFamily() {
     RefreshToken existing = activeToken(7L, "family-1", "old-hash");
     RefreshTokenFamily family = activeFamily(7L, "family-1");

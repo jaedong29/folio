@@ -43,7 +43,7 @@ public class RefreshTokenService {
 
   @Transactional
   public IssuedRefreshToken issue(Long userId) {
-    Instant now = Instant.now(clock);
+    Instant now = now();
     Instant expiresAt = now.plus(properties.refreshExpirationDays(), ChronoUnit.DAYS);
     RefreshTokenFamily family =
         RefreshTokenFamily.issue(UUID.randomUUID().toString(), userId, now, expiresAt);
@@ -65,7 +65,7 @@ public class RefreshTokenService {
         familyRepository
             .findById(existing.getFamilyId())
             .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
-    Instant now = Instant.now(clock);
+    Instant now = now();
 
     if (existing.isRevoked() || family.isRevoked()) {
       log.warn(
@@ -90,7 +90,7 @@ public class RefreshTokenService {
         .findByTokenHash(hash(rawToken))
         .ifPresent(
             token -> {
-              Instant now = Instant.now(clock);
+              Instant now = now();
               token.revoke(now);
               familyRepository.findById(token.getFamilyId()).ifPresent(family -> family.revoke(now));
               repository.revokeAllByFamilyId(token.getFamilyId(), now);
@@ -100,7 +100,7 @@ public class RefreshTokenService {
   /** 비밀번호 변경·회원 탈퇴처럼 다른 모든 세션을 강제로 끊어야 할 때 쓴다. */
   @Transactional
   public void revokeAllForUser(Long userId) {
-    Instant now = Instant.now(clock);
+    Instant now = now();
     familyRepository.revokeAllByUserId(userId, now);
     repository.revokeAllByUserId(userId, now);
   }
@@ -114,7 +114,7 @@ public class RefreshTokenService {
   @Scheduled(fixedRate = 86_400_000)
   @Transactional
   public void evictExpiredTokens() {
-    Instant cutoff = Instant.now(clock).minus(FAMILY_RETENTION_DAYS, ChronoUnit.DAYS);
+    Instant cutoff = now().minus(FAMILY_RETENTION_DAYS, ChronoUnit.DAYS);
     List<String> expiredFamilyIds = familyRepository.findIdsByExpiresAtBefore(cutoff);
     if (!expiredFamilyIds.isEmpty()) {
       int deletedTokens = repository.deleteAllByFamilyIdIn(expiredFamilyIds);
@@ -150,6 +150,11 @@ public class RefreshTokenService {
     byte[] bytes = new byte[32];
     SECURE_RANDOM.nextBytes(bytes);
     return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  }
+
+  private Instant now() {
+    // MySQL DATETIME(6)와 H2가 저장하는 마이크로초 정밀도에 맞춰, 최초 응답과 DB 재조회 값을 동일하게 한다.
+    return Instant.now(clock).truncatedTo(ChronoUnit.MICROS);
   }
 
   private String hash(String rawToken) {

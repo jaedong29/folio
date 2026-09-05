@@ -239,6 +239,7 @@ hash와 family를 함께 지우면 재사용 탐지 기간과 저장량 상한�
 | 과거 token은 만료됐지만 family는 활성 | 정리 작업 뒤에도 hash와 family 모두 보존 |
 | family 절대 만료 + 7일 경과 | 해당 family의 모든 token hash를 먼저 지우고 family row 삭제 |
 | V12 기존 데이터 backfill(MySQL 8.0) | 활성 token이 남은 family는 ACTIVE·최대 만료 유지, 전부 폐기된 family는 REVOKED로 이관 |
+| JVM 나노초 시각과 DB `DATETIME(6)` | 발급 시각을 마이크로초로 정규화해 최초 응답과 DB 재조회 만료가 정확히 일치 |
 
 실 서버에서도 로그인 → 정상 회전 → 첫 token 재사용 순서로 호출해 첫 token과 방금 받은 token이 모두
 `401 INVALID_REFRESH_TOKEN`이 되는지 확인했다. 별도 로그인 family는 로그아웃 후 재발급이 같은 401로 거부됐다.
