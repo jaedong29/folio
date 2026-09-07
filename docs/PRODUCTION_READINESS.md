@@ -14,7 +14,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | 비밀 관리 | API 키·JWT Secret은 환경변수로만 주입, 코드·설정 파일에 저장하지 않음. `prod` 프로필은 `APP_JWT_SECRET` 없으면 기동 자체가 실패 | `application.yml`, `JwtTokenProvider.java` |
 | 데이터 삭제 | 회원 탈퇴 시 자산·거래·Snapshot·근거 문서·Agent Trace·평가 배치·Refresh Token까지 연쇄 삭제. 법적·운영 보존 정책이 필요한 내부 사용자 id·액션·시각의 최소 감사 기록만 별도 보존 | `UserAccountService.deleteAccount()` |
 | 인가 | 소유권 기반 404(리소스 존재 여부 비노출), `SecurityContext` 기반 `userId`만 신뢰, 신규 API는 기본적으로 인증 필요(명시적으로 연 경로만 예외) | `SecurityConfig.java` |
-| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V12`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
+| DB 마이그레이션 | Flyway로 스키마 이력 관리(`V1~V13`), `prod`는 `ddl-auto=validate`로 스키마 드리프트 방지 | `db/migration/` |
 | 백업 | AWS 스테이징용 백업·복구·검증 스크립트 존재(수동 실행) | `deploy/aws/backup.sh`, `restore.sh`, `verify-backup.sh` |
 | LLM 안전장치 | 숫자 조작·가격 인과·Prompt Injection·문장수·비정상 토큰을 규칙 기반으로 차단, 골든셋으로 회귀 검증 | `evidence/news/NewsAnswerGuardrail.java`, `news/NewsSummaryGuardrail.java` |
 | 인증 API rate limit | 같은 이메일 로그인 실패 5회 연속 시 15분 잠금(brute force 방어), 같은 IP의 `/api/auth/**` 요청은 60초에 20회로 제한(스캐닝·스팸 방어) — 둘 다 실제 서버 기동 후 curl로 재현 검증 | `global/security/LoginAttemptGuard.java`, `AuthRateLimitFilter.java` |
@@ -24,6 +24,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | Graceful shutdown | SIGTERM 수신 시 새 요청을 받지 않고 진행 중인 요청을 최대 30초까지 기다린 뒤 종료. Docker 종료 유예는 35초로 두어 애플리케이션보다 먼저 SIGKILL하지 않게 함 | `application.yml`, `docker-compose.yml`, `deploy/aws/docker-compose.yml` |
 | 민감 액션 감사 로그 | 비밀번호 변경·회원 탈퇴 성공을 내부 사용자 id·액션·시각만 별도 append-only 테이블에 기록. 업무 변경과 같은 트랜잭션에 참여해 실패한 변경을 성공으로 기록하지 않고, users FK를 두지 않아 탈퇴 후에도 보존 | `global/audit`, `V10__audit_logs.sql`, `UserAccountService.java` |
 | 감사·Trace·평가 기록 보존 | 감사 로그 365일, 일반 Agent Trace 30일, 완료·실패 평가 배치 90일의 운영 기본값을 두고 매일 500건 단위 SQL로 자동 정리. 보존 중인 평가 배치가 참조하는 Trace와 진행 중인 배치는 삭제하지 않으며 기간은 환경변수로 조정. 격리 MySQL에서 V1~V13, 운영 schema validation, 실제 Scheduler 삭제까지 확인 | `global/retention`, `V13__retention_cleanup_indexes.sql` |
+| 외부 API 장애 격리 | Yahoo/Binance/Upbit/GitHub/NIM별 Circuit Breaker를 분리. 멱등 GET의 network·5xx만 지수 backoff로 출처별 최대 횟수까지 재시도하고, 4xx 업무 오류는 즉시 실패. NIM POST는 중복 과금을 피하려 재시도하지 않으며 상태·호출 지표는 Micrometer에 등록 | `global/resilience`, `ExternalCallResilience.java` |
 
 ## 남은 갭
 
@@ -39,8 +40,6 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 ### 신뢰성 · 장애 대응
 
 - **다중 인스턴스를 전제하지 않는다.** News 요약·수집 Worker는 프로세스 내부 동기화로 중복 작업을 줄이는데, 이는 단일 인스턴스에서만 유효하다. 인스턴스를 늘리려면 DB 기반 claim 락이나 메시지 큐가 필요하다.
-- **외부 API 호출에 Circuit Breaker가 없다.** Yahoo Finance·Binance·Upbit·NVIDIA NIM 호출이 각자의 timeout에만 의존하고, 연속 실패를 감지해 자동으로 호출을 줄이는 회로 차단기가 없다(Resilience4j 등 미도입).
-- **외부 API 실패 재시도 정책이 source마다 분리돼 있지 않다.** 뉴스 수집 실패는 안전한 오류 코드만 기록할 뿐, 지수 백오프나 source별 재시도 한도는 없다.
 
 ### 관측가능성
 
@@ -55,10 +54,9 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 ## 지금부터 순서대로 하나만 고른다면
 
-1. **외부 API Circuit Breaker와 source별 재시도.** 단일 인스턴스에서도 Yahoo/Binance/Upbit/NIM 장애 전파를 줄이는 실효가 있다. retry 가능한 오류와 즉시 실패할 오류를 먼저 분리한 뒤 도입한다.
-2. **GitHub Actions major 업데이트.** 정합성·보안 수정이 끝난 뒤 `setup-java`, `checkout`, `setup-gradle`을 공식 최신 안정 major로 함께 올리고 실제 GitHub 실행을 확인한다.
+1. **GitHub Actions major 업데이트.** 정합성·보안 수정이 끝났으므로 `setup-java`, `checkout`, `setup-gradle`을 공식 최신 안정 major로 함께 올리고 실제 GitHub 실행을 확인한다.
 
-CI의 `actions/setup-java@v5` 전환은 실제 GitHub 실행에 성공해 현재 기능 문제는 없다. 다만 2026-09-05 기준
+CI의 `actions/setup-java@v5` 전환은 실제 GitHub 실행에 성공해 현재 기능 문제는 없다. 다만 2026-09-07 기준
 공식 최신 안정판은 v6이고 `actions/checkout`, `gradle/actions/setup-gradle`도 새 major가 있으므로, 위 정합성·보안
 수정 뒤 별도 유지보수 커밋으로 함께 갱신한다.
 

@@ -1,5 +1,7 @@
 package com.assetdashboard.infra.price.crypto;
 
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.assetdashboard.infra.price.PriceProperties;
 import com.assetdashboard.infra.price.PriceProviderException;
 import com.assetdashboard.infra.price.PriceProviderException.Kind;
@@ -23,6 +25,7 @@ public class BinanceClient {
 
   private final RestClient priceRestClient;
   private final PriceProperties properties;
+  private final ExternalCallResilience resilience;
 
   /**
    * 코인의 USDT 기준 가격을 조회한다.
@@ -41,13 +44,19 @@ public class BinanceClient {
     }
     String pair = symbol + QUOTE_ASSET;
     try {
-      JsonNode body = priceRestClient.get().uri(TICKER_URL, pair).retrieve().body(JsonNode.class);
-      JsonNode price = body == null ? null : body.path("price");
-      if (price == null || price.isMissingNode() || price.isNull()) {
-        throw new PriceProviderException(
-            Kind.SYMBOL_NOT_FOUND, "Binance 에 존재하지 않는 페어입니다: %s".formatted(pair));
-      }
-      return new BigDecimal(price.asText());
+      return resilience.executeRead(
+          ExternalSource.BINANCE,
+          () -> {
+            JsonNode body =
+                priceRestClient.get().uri(TICKER_URL, pair).retrieve().body(JsonNode.class);
+            JsonNode price = body == null ? null : body.path("price");
+            if (price == null || price.isMissingNode() || price.isNull()) {
+              throw new PriceProviderException(
+                  Kind.SYMBOL_NOT_FOUND,
+                  "Binance 에 존재하지 않는 페어입니다: %s".formatted(pair));
+            }
+            return new BigDecimal(price.asText());
+          });
     } catch (PriceProviderException e) {
       throw e;
     } catch (HttpClientErrorException e) {

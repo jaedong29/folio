@@ -1,5 +1,7 @@
 package com.assetdashboard.infra.price.fx;
 
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.assetdashboard.infra.price.PriceProperties;
 import com.assetdashboard.infra.price.PriceProviderException;
 import com.assetdashboard.infra.price.PriceProviderException.Kind;
@@ -19,6 +21,7 @@ public class YahooFinanceExchangeRateClient {
 
   private final RestClient priceRestClient;
   private final PriceProperties properties;
+  private final ExternalCallResilience resilience;
 
   /**
    * 현재 USD/KRW 환율을 조회한다.
@@ -35,16 +38,26 @@ public class YahooFinanceExchangeRateClient {
           "외부 시세 조회가 비활성화되어 있습니다. (app.price.external-enabled=false)");
     }
     try {
-      JsonNode body = priceRestClient.get().uri(USD_KRW_URL).retrieve().body(JsonNode.class);
-      JsonNode price =
-          body == null
-              ? null
-              : body.path("chart").path("result").path(0).path("meta").path("regularMarketPrice");
-      if (price == null || price.isMissingNode() || price.isNull()) {
-        throw new PriceProviderException(
-            Kind.PROVIDER_UNAVAILABLE, "Yahoo Finance USD/KRW 응답에 가격이 없습니다.");
-      }
-      return price.decimalValue();
+      return resilience.executeRead(
+          ExternalSource.YAHOO_FINANCE,
+          () -> {
+            JsonNode body =
+                priceRestClient.get().uri(USD_KRW_URL).retrieve().body(JsonNode.class);
+            JsonNode price =
+                body == null
+                    ? null
+                    : body
+                        .path("chart")
+                        .path("result")
+                        .path(0)
+                        .path("meta")
+                        .path("regularMarketPrice");
+            if (price == null || price.isMissingNode() || price.isNull()) {
+              throw new PriceProviderException(
+                  Kind.PROVIDER_UNAVAILABLE, "Yahoo Finance USD/KRW 응답에 가격이 없습니다.");
+            }
+            return price.decimalValue();
+          });
     } catch (PriceProviderException e) {
       throw e;
     } catch (Exception e) {

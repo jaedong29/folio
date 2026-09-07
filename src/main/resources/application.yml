@@ -53,6 +53,19 @@ app:
     agent-trace-days: ${APP_RETENTION_AGENT_TRACE_DAYS:30}
     evaluation-batch-days: ${APP_RETENTION_EVALUATION_BATCH_DAYS:90}
     cleanup-delay-millis: ${APP_RETENTION_CLEANUP_DELAY_MILLIS:86400000}
+  external-resilience:
+    # 출처별로 독립된 상태를 두며, 아래 횟수에는 최초 호출도 포함된다.
+    sliding-window-size: ${APP_RESILIENCE_SLIDING_WINDOW_SIZE:10}
+    minimum-number-of-calls: ${APP_RESILIENCE_MINIMUM_CALLS:5}
+    failure-rate-threshold: ${APP_RESILIENCE_FAILURE_RATE_THRESHOLD:50}
+    permitted-calls-in-half-open-state: ${APP_RESILIENCE_HALF_OPEN_CALLS:2}
+    open-state-wait-millis: ${APP_RESILIENCE_OPEN_WAIT_MILLIS:30000}
+    # 가격 조회는 사용자 요청 지연을 제한해 2회, 백그라운드 GitHub 수집은 3회까지 시도한다.
+    yahoo-read-max-attempts: ${APP_RESILIENCE_YAHOO_MAX_ATTEMPTS:2}
+    binance-read-max-attempts: ${APP_RESILIENCE_BINANCE_MAX_ATTEMPTS:2}
+    upbit-read-max-attempts: ${APP_RESILIENCE_UPBIT_MAX_ATTEMPTS:2}
+    github-read-max-attempts: ${APP_RESILIENCE_GITHUB_MAX_ATTEMPTS:3}
+    read-retry-initial-wait-millis: ${APP_RESILIENCE_RETRY_INITIAL_WAIT_MILLIS:200}
   price:
     cache-ttl-minutes: 15
     timeout-millis: 2000
@@ -100,7 +113,8 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # health만 공개이고 metrics는 SecurityConfig 기본 정책에 따라 인증이 필요하다.
+        include: health,info,metrics
   endpoint:
     health:
       probes:

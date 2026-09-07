@@ -8,6 +8,9 @@ import com.assetdashboard.evidence.trend.PriceTrendEvidenceToolAdapter;
 import com.assetdashboard.evidence.trace.AgentTokenUsage;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.resilience.ExternalCallRejectedException;
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -42,14 +45,17 @@ public class NvidiaNimFinancialAgentModelClient implements FinancialAgentModelCl
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
   private final FinancialAgentProperties properties;
+  private final ExternalCallResilience resilience;
 
   public NvidiaNimFinancialAgentModelClient(
       @Qualifier("financialAgentRestClient") RestClient restClient,
       ObjectMapper objectMapper,
-      FinancialAgentProperties properties) {
+      FinancialAgentProperties properties,
+      ExternalCallResilience resilience) {
     this.restClient = restClient;
     this.objectMapper = objectMapper;
     this.properties = properties;
+    this.resilience = resilience;
   }
 
   @Override
@@ -168,20 +174,25 @@ public class NvidiaNimFinancialAgentModelClient implements FinancialAgentModelCl
     long startedAt = System.nanoTime();
     try {
       ChatResponse response =
-          restClient
-              .post()
-              .uri(CHAT_COMPLETIONS_PATH)
-              .contentType(MediaType.APPLICATION_JSON)
-              .header("Authorization", "Bearer " + properties.apiKey())
-              .body(request)
-              .retrieve()
-              .body(ChatResponse.class);
+          resilience.executeOnce(
+              ExternalSource.NVIDIA_NIM,
+              () ->
+                  restClient
+                      .post()
+                      .uri(CHAT_COMPLETIONS_PATH)
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .header("Authorization", "Bearer " + properties.apiKey())
+                      .body(request)
+                      .retrieve()
+                      .body(ChatResponse.class));
       if (response == null) {
         throw invalidResponse("EMPTY_RESPONSE");
       }
       return new TimedResponse(response, elapsedMs(startedAt));
     } catch (BusinessException e) {
       throw e;
+    } catch (ExternalCallRejectedException e) {
+      throw new BusinessException(ErrorCode.AI_PROVIDER_UNAVAILABLE);
     } catch (RestClientException e) {
       log.warn("NIM API call failed: {}", e.getClass().getSimpleName());
       throw new BusinessException(ErrorCode.AI_PROVIDER_UNAVAILABLE);

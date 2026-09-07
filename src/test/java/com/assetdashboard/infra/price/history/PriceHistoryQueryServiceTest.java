@@ -5,6 +5,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.assetdashboard.domain.asset.entity.AssetType;
+import com.assetdashboard.global.resilience.ExternalCallResilienceTestSupport;
 import com.assetdashboard.infra.price.PriceProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -18,7 +19,10 @@ class PriceHistoryQueryServiceTest {
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     PriceHistoryQueryService service =
-        new PriceHistoryQueryService(builder.build(), new PriceProperties(15, 2000, true));
+        new PriceHistoryQueryService(
+            builder.build(),
+            new PriceProperties(15, 2000, true),
+            ExternalCallResilienceTestSupport.create());
 
     server
         .expect(

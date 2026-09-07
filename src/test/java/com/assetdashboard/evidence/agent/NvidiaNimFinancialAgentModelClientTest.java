@@ -16,6 +16,7 @@ import com.assetdashboard.evidence.calculation.AssetEvidenceResponse.PriceEviden
 import com.assetdashboard.evidence.calculation.AssetEvidenceResponse.TransactionEvidence;
 import com.assetdashboard.evidence.calculation.EvidenceConclusion;
 import com.assetdashboard.evidence.calculation.EvidenceValueStatus;
+import com.assetdashboard.global.resilience.ExternalCallResilienceTestSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -45,7 +46,10 @@ class NvidiaNimFinancialAgentModelClientTest {
             0);
     NvidiaNimFinancialAgentModelClient client =
         new NvidiaNimFinancialAgentModelClient(
-            builder.build(), new ObjectMapper().findAndRegisterModules(), properties);
+            builder.build(),
+            new ObjectMapper().findAndRegisterModules(),
+            properties,
+            ExternalCallResilienceTestSupport.create());
 
     server
         .expect(requestTo("https://nim.test/v1/chat/completions"))
@@ -135,7 +139,10 @@ class NvidiaNimFinancialAgentModelClientTest {
             0);
     NvidiaNimFinancialAgentModelClient client =
         new NvidiaNimFinancialAgentModelClient(
-            builder.build(), new ObjectMapper().findAndRegisterModules(), properties);
+            builder.build(),
+            new ObjectMapper().findAndRegisterModules(),
+            properties,
+            ExternalCallResilienceTestSupport.create());
 
     server
         .expect(requestTo("https://nim.test/v1/chat/completions"))

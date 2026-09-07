@@ -434,6 +434,78 @@ DB 재조회도 각각 1/1/2건만 남아 최근 기록과 오래된 `RUNNING` �
 
 ---
 
+## 3-6. 외부 API Circuit Breaker와 출처별 재시도 — 장애 전파와 중복 과금을 함께 제한
+
+### 무엇을 했나
+Yahoo Finance, Binance, Upbit, GitHub Releases, NVIDIA NIM에 Resilience4j Circuit Breaker를 적용했다. 출처마다
+별도 인스턴스와 상태를 사용하므로 GitHub가 열려도 Yahoo나 Binance 호출은 계속된다. 최근 10개 논리 요청 중
+최소 5개가 쌓인 뒤 실패율이 50% 이상이면 30초 동안 호출을 차단하고, half-open에서 2개 요청으로 회복을
+확인한다. 상태 전환과 재시도는 출처·횟수·예외 클래스만 로그에 남기고 URL, 요청 본문, API 키는 기록하지 않는다.
+
+멱등인 GET만 네트워크 연결·timeout과 HTTP 5xx에 재시도한다. 사용자 화면의 가격 요청은 지연 상한을 줄이려고
+Yahoo/Binance/Upbit 모두 최초 포함 2회, 백그라운드 GitHub 수집은 최초 포함 3회다. 최초 대기는 200ms이고 다음
+재시도마다 두 배로 늘어난다. 각 횟수는 출처별 환경변수로 독립 조정할 수 있다. 400/401/403/404 같은 4xx는
+재시도하지 않고 차단기 장애율에서도 제외하되, 일시적 제한인 429는 재시도 폭주를 피하려 즉시 실패시키면서
+출처 실패로는 집계한다.
+
+NVIDIA NIM Chat Completions POST에는 Circuit Breaker만 적용하고 자동 재시도는 하지 않는다. 제공자가 요청을
+처리했지만 응답만 유실된 상황에서 같은 프롬프트를 다시 보내면 사용자에게는 한 번인 작업이 두 번 과금될 수 있기
+때문이다. 기존 fallback 계약은 유지해 가격·환율·차트는 last-good 또는 unavailable로 내려가고, GitHub와 NIM은
+기존의 안전한 오류 코드로 변환한다. Resilience4j의 Circuit Breaker·Retry 지표는 Micrometer에 등록하며
+`/actuator/metrics`는 health와 달리 기존 Security 기본 정책에 따라 인증된 요청만 접근할 수 있다.
+
+### 왜 그렇게 했나
+timeout은 느린 호출 한 건의 상한만 정할 뿐, 이미 죽은 제공자를 사용자 요청마다 계속 기다리는 문제는 막지
+못한다. 반대로 모든 실패를 같은 방식으로 재시도하면 존재하지 않는 심볼 같은 확정 오류까지 반복하고, NIM은
+비용까지 중복될 수 있다. 그래서 **호출 출처**, **멱등성**, **실패 종류**를 함께 분리했다.
+
+Circuit Breaker를 Retry 바깥에 배치했다. 한 사용자의 논리 요청이 내부에서 2~3회 시도돼도 차단기에는 최종 성공
+또는 실패 한 건으로 기록된다. Retry를 바깥에 두면 한 번의 요청이 실패율 표본 여러 개를 차지해 차단기가 실제
+요청 수보다 빨리 열릴 수 있다.
+
+Java 17을 유지하므로 Resilience4j 2.4.0을 선택했다. 현재 3.x는 Java 21을 요구하므로 라이브러리를 올리기 위해
+프로젝트 런타임 전체를 함께 바꾸지 않았다.
+
+### 검토한 대안
+| 대안 | 왜 채택하지 않았나 |
+|---|---|
+| 모든 호출을 같은 Circuit Breaker로 묶기 | 한 제공자의 장애가 정상인 다른 제공자까지 차단한다 |
+| `@Retry`·`@CircuitBreaker` annotation 중첩 | proxy 순서가 설정에 숨어 논리 요청 실패가 여러 건으로 집계될 수 있고, private/self 호출에는 적용되지 않는다 |
+| 429도 고정 간격으로 즉시 재시도 | `Retry-After`를 해석하지 않은 재시도는 제한을 더 악화시킬 수 있다 |
+| NIM POST도 3회 재시도 | 서버 처리 뒤 응답 유실을 구분할 수 없어 중복 토큰 사용·과금 위험이 있다 |
+| Resilience4j 3.x | Java 21이 필요해 현재 Java 17 프로젝트 범위를 넘는다 |
+
+### 실제 확인 결과
+| 검증 | 결과 |
+|---|---|
+| GET network/5xx 뒤 성공 | 설정된 출처별 최대 횟수 안에서 재시도한 뒤 정상 응답 반환 |
+| GET 404 | 1회만 호출, `SYMBOL_NOT_FOUND` 유지, 차단기 표본에도 넣지 않음 |
+| 논리 요청 2건이 각각 내부 3회 실패 | supplier는 6회 실행되지만 차단기 실패는 2건만 기록되고 open |
+| GitHub 차단기 open | 추가 supplier 실행 없이 즉시 거부, Yahoo/Binance 차단기는 closed 유지 |
+| NIM 5xx | POST 1회만 실행하고 `AI_PROVIDER_UNAVAILABLE` |
+| Spring 실제 구성 | 환경변수 binding, 출처별 registry, Micrometer `resilience4j.circuitbreaker.calls`와 `resilience4j.retry.calls` 등록 확인 |
+
+클래스 단위 `@Transactional`이 없는 `@SpringBootTest`로 실제 Spring 설정과 registry/metrics 연결을 확인했다.
+외부 Adapter 테스트에서는 Mock HTTP가 5xx 후 200을 반환하도록 해 실제 `RestClient` 경로가 재시도를 통과하는지,
+NIM은 5xx여도 두 번째 POST가 발생하지 않는지 검증했다. 실 서버에서는 인증 후 metrics endpoint와 기존
+stale/unavailable fallback을 HTTP로 다시 확인했다.
+
+### 실무자가 물어볼 만한 지점
+- **"왜 5회 실패가 아니라 50%인가?"**
+  → 간헐 장애와 지속 장애를 구분하면서도 최소 5건 전에는 열리지 않게 했다. 현재 개인 MVP 트래픽의 운영
+  기본값이며 실제 지표를 보고 조정할 값이다.
+- **"half-open 전환은 누가 만드는가?"**
+  → 30초 뒤 들어온 다음 호출이 상태를 half-open으로 바꾸고 제한된 2개 호출로 회복을 판단한다. 별도 Scheduler는
+  두지 않았다.
+- **"재시도하면 화면이 더 느려지지 않나?"**
+  → 그렇다. 그래서 2초 timeout인 가격 GET은 최대 2회로 제한했다. Circuit Breaker가 열린 뒤에는 외부 대기 없이
+  기존 last-good fallback으로 바로 내려간다.
+- **"왜 429를 재시도하지 않는데 실패로 세나?"**
+  → 제한 중인 출처에 즉시 반복 요청하지 않으면서, 연속 제한 시에는 차단기를 열어 추가 호출 자체를 줄이기
+  위해서다. 향후 `Retry-After`를 신뢰할 수 있는 공식 API로 전환하면 source adapter 정책을 따로 확장한다.
+
+---
+
 ## 4. 외부 시세 조회 — 트랜잭션 경계가 핵심
 
 ### 무엇을 했나

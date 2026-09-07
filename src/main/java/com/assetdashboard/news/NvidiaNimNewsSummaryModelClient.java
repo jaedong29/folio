@@ -3,6 +3,9 @@ package com.assetdashboard.news;
 import com.assetdashboard.evidence.agent.FinancialAgentProperties;
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.resilience.ExternalCallRejectedException;
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -36,16 +39,19 @@ public class NvidiaNimNewsSummaryModelClient implements NewsSummaryModelClient {
   private final ObjectMapper objectMapper;
   private final FinancialAgentProperties aiProperties;
   private final NewsProperties newsProperties;
+  private final ExternalCallResilience resilience;
 
   public NvidiaNimNewsSummaryModelClient(
       @Qualifier("financialAgentRestClient") RestClient restClient,
       ObjectMapper objectMapper,
       FinancialAgentProperties aiProperties,
-      NewsProperties newsProperties) {
+      NewsProperties newsProperties,
+      ExternalCallResilience resilience) {
     this.restClient = restClient;
     this.objectMapper = objectMapper;
     this.aiProperties = aiProperties;
     this.newsProperties = newsProperties;
+    this.resilience = resilience;
   }
 
   @Override
@@ -68,14 +74,17 @@ public class NvidiaNimNewsSummaryModelClient implements NewsSummaryModelClient {
     long startedAt = System.nanoTime();
     try {
       ChatResponse response =
-          restClient
-              .post()
-              .uri(CHAT_COMPLETIONS_PATH)
-              .contentType(MediaType.APPLICATION_JSON)
-              .header("Authorization", "Bearer " + aiProperties.apiKey())
-              .body(request)
-              .retrieve()
-              .body(ChatResponse.class);
+          resilience.executeOnce(
+              ExternalSource.NVIDIA_NIM,
+              () ->
+                  restClient
+                      .post()
+                      .uri(CHAT_COMPLETIONS_PATH)
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .header("Authorization", "Bearer " + aiProperties.apiKey())
+                      .body(request)
+                      .retrieve()
+                      .body(ChatResponse.class));
       long latencyMs = Math.max(0, (System.nanoTime() - startedAt) / 1_000_000);
       Choice choice = requireChoice(response);
       SummaryPayload parsed = parseSummary(choice.message() == null ? null : choice.message().content());
@@ -91,6 +100,8 @@ public class NvidiaNimNewsSummaryModelClient implements NewsSummaryModelClient {
           usage == null || usage.completionTokens() == null ? 0 : usage.completionTokens());
     } catch (BusinessException e) {
       throw e;
+    } catch (ExternalCallRejectedException e) {
+      throw new BusinessException(ErrorCode.AI_PROVIDER_UNAVAILABLE);
     } catch (RestClientException e) {
       log.warn("NIM news summary call failed: {}", e.getClass().getSimpleName());
       throw new BusinessException(ErrorCode.AI_PROVIDER_UNAVAILABLE);

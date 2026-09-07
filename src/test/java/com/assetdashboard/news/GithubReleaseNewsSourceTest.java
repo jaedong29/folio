@@ -3,10 +3,12 @@ package com.assetdashboard.news;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.resilience.ExternalCallResilienceTestSupport;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -28,7 +30,8 @@ class GithubReleaseNewsSourceTest {
     NewsProperties properties =
         new NewsProperties(true, 1000, 1000, 360, 10, 1000, false, 1200, 6000);
     GithubReleaseNewsSource source =
-        new GithubReleaseNewsSource(builder.build(), properties, FIXED_CLOCK);
+        new GithubReleaseNewsSource(
+            builder.build(), properties, FIXED_CLOCK, ExternalCallResilienceTestSupport.create());
     server.expect(
             requestTo(
                 "https://api.github.com/repos/ZcashFoundation/zebra/releases?per_page=10"))
@@ -67,7 +70,8 @@ class GithubReleaseNewsSourceTest {
         new GithubReleaseNewsSource(
             builder.build(),
             new NewsProperties(true, 1000, 1000, 360, 10, 1000, false, 1200, 6000),
-            FIXED_CLOCK);
+            FIXED_CLOCK,
+            ExternalCallResilienceTestSupport.create());
     server.expect(
             requestTo(
                 "https://api.github.com/repos/ZcashFoundation/zebra/releases?per_page=10"))
@@ -86,12 +90,32 @@ class GithubReleaseNewsSourceTest {
   }
 
   @Test
+  void retriesTransientServerFailureBeforeCollecting() {
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    GithubReleaseNewsSource source =
+        new GithubReleaseNewsSource(
+            builder.build(),
+            new NewsProperties(true, 1000, 1000, 360, 10, 1000, false, 1200, 6000),
+            FIXED_CLOCK,
+            ExternalCallResilienceTestSupport.create());
+    String url = "https://api.github.com/repos/ZcashFoundation/zebra/releases?per_page=10";
+    server.expect(requestTo(url)).andRespond(withServerError());
+    server.expect(requestTo(url)).andRespond(withServerError());
+    server.expect(requestTo(url)).andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+    assertThat(source.fetch()).isEmpty();
+    server.verify();
+  }
+
+  @Test
   void refusesExternalCollectionWhenDisabled() {
     GithubReleaseNewsSource source =
         new GithubReleaseNewsSource(
             RestClient.create(),
             new NewsProperties(false, 1000, 1000, 360, 10, 1000, false, 1200, 6000),
-            FIXED_CLOCK);
+            FIXED_CLOCK,
+            ExternalCallResilienceTestSupport.create());
 
     assertThatThrownBy(source::fetch)
         .isInstanceOfSatisfying(

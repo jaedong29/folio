@@ -1,13 +1,18 @@
 package com.assetdashboard.news;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 
 import com.assetdashboard.evidence.agent.FinancialAgentProperties;
+import com.assetdashboard.global.exception.BusinessException;
+import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.resilience.ExternalCallResilienceTestSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -62,7 +67,11 @@ class NvidiaNimNewsSummaryModelClientTest {
         new NewsProperties(true, 1000, 1000, 360, 10, 1000, true, 1200, 6000);
     NvidiaNimNewsSummaryModelClient client =
         new NvidiaNimNewsSummaryModelClient(
-            builder.build(), new ObjectMapper().findAndRegisterModules(), ai, news);
+            builder.build(),
+            new ObjectMapper().findAndRegisterModules(),
+            ai,
+            news,
+            ExternalCallResilienceTestSupport.create());
 
     server
         .expect(requestTo("https://nim.test/v1/chat/completions"))
@@ -96,6 +105,34 @@ class NvidiaNimNewsSummaryModelClientTest {
     assertThat(result.significanceKo()).isEqualTo("노드 연결 경로를 보강하는 변경입니다.");
     assertThat(result.inputTokens()).isEqualTo(120);
     assertThat(result.outputTokens()).isEqualTo(30);
+    server.verify();
+  }
+
+  @Test
+  void doesNotRetryPotentiallyChargeableNimPost() {
+    RestClient.Builder builder = RestClient.builder().baseUrl("https://nim.test/v1");
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    FinancialAgentProperties ai =
+        new FinancialAgentProperties(
+            true, "https://nim.test/v1", "test-key", "nemotron", 1000, 1000, false, 0, 0);
+    NewsProperties news =
+        new NewsProperties(true, 1000, 1000, 360, 10, 1000, true, 1200, 6000);
+    NvidiaNimNewsSummaryModelClient client =
+        new NvidiaNimNewsSummaryModelClient(
+            builder.build(),
+            new ObjectMapper().findAndRegisterModules(),
+            ai,
+            news,
+            ExternalCallResilienceTestSupport.create());
+    server.expect(requestTo("https://nim.test/v1/chat/completions")).andRespond(withServerError());
+
+    assertThatThrownBy(
+            () ->
+                client.summarize(
+                    new ClaimedNewsSummary(1L, "hash", "title", "publisher", "content")))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.AI_PROVIDER_UNAVAILABLE));
     server.verify();
   }
 }

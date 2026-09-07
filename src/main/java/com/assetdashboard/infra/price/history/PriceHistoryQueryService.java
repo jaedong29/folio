@@ -1,6 +1,8 @@
 package com.assetdashboard.infra.price.history;
 
 import com.assetdashboard.domain.asset.entity.AssetType;
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.assetdashboard.infra.price.PriceProperties;
 import com.assetdashboard.infra.price.SymbolKey;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,6 +35,7 @@ public class PriceHistoryQueryService {
 
   private final RestClient priceRestClient;
   private final PriceProperties properties;
+  private final ExternalCallResilience resilience;
   private final Map<SymbolKey, PriceHistoryQuote> cache = new ConcurrentHashMap<>();
   private final Map<SymbolKey, Object> locks = new ConcurrentHashMap<>();
 
@@ -65,8 +68,12 @@ public class PriceHistoryQueryService {
         if (!properties.externalEnabled()) {
           throw new IllegalStateException("외부 시세 조회 비활성화");
         }
+        ExternalSource externalSource =
+            type == AssetType.STOCK ? ExternalSource.YAHOO_FINANCE : ExternalSource.BINANCE;
         List<PriceHistoryPoint> points =
-            type == AssetType.STOCK ? fetchYahoo(symbol) : fetchBinance(symbol);
+            resilience.executeRead(
+                externalSource,
+                () -> type == AssetType.STOCK ? fetchYahoo(symbol) : fetchBinance(symbol));
         if (points.isEmpty()) {
           throw new IllegalStateException("가격 시계열이 비어 있음");
         }

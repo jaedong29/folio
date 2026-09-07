@@ -1,6 +1,8 @@
 package com.assetdashboard.infra.price.stock;
 
 import com.assetdashboard.domain.asset.entity.AssetType;
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.assetdashboard.infra.price.PriceProperties;
 import com.assetdashboard.infra.price.PriceProvider;
 import com.assetdashboard.infra.price.PriceProviderException;
@@ -35,6 +37,7 @@ public class YahooFinancePriceProvider implements PriceProvider {
 
   private final RestClient priceRestClient;
   private final PriceProperties properties;
+  private final ExternalCallResilience resilience;
 
   @Override
   public boolean supports(AssetType type) {
@@ -48,8 +51,13 @@ public class YahooFinancePriceProvider implements PriceProvider {
           Kind.PROVIDER_UNAVAILABLE, "외부 시세 조회가 비활성화되어 있습니다. (app.price.external-enabled=false)");
     }
     try {
-      JsonNode body = priceRestClient.get().uri(CHART_URL, symbol).retrieve().body(JsonNode.class);
-      return PriceQuote.of(extractPrice(body, symbol));
+      return resilience.executeRead(
+          ExternalSource.YAHOO_FINANCE,
+          () -> {
+            JsonNode body =
+                priceRestClient.get().uri(CHART_URL, symbol).retrieve().body(JsonNode.class);
+            return PriceQuote.of(extractPrice(body, symbol));
+          });
     } catch (PriceProviderException e) {
       throw e;
     } catch (HttpClientErrorException e) {

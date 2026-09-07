@@ -2,6 +2,9 @@ package com.assetdashboard.news;
 
 import com.assetdashboard.global.exception.BusinessException;
 import com.assetdashboard.global.exception.ErrorCode;
+import com.assetdashboard.global.resilience.ExternalCallRejectedException;
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Clock;
 import java.time.Instant;
@@ -30,14 +33,17 @@ public class GithubReleaseNewsSource implements OfficialNewsSource {
   private final RestClient restClient;
   private final NewsProperties properties;
   private final Clock clock;
+  private final ExternalCallResilience resilience;
 
   public GithubReleaseNewsSource(
       @Qualifier("newsRestClient") RestClient restClient,
       NewsProperties properties,
-      Clock clock) {
+      Clock clock,
+      ExternalCallResilience resilience) {
     this.restClient = restClient;
     this.properties = properties;
     this.clock = clock;
+    this.resilience = resilience;
   }
 
   @Override
@@ -67,11 +73,14 @@ public class GithubReleaseNewsSource implements OfficialNewsSource {
     }
     try {
       JsonNode response =
-          restClient
-              .get()
-              .uri(RELEASES_URL, properties.maxItemsPerSource())
-              .retrieve()
-              .body(JsonNode.class);
+          resilience.executeRead(
+              ExternalSource.GITHUB_RELEASES,
+              () ->
+                  restClient
+                      .get()
+                      .uri(RELEASES_URL, properties.maxItemsPerSource())
+                      .retrieve()
+                      .body(JsonNode.class));
       if (response == null || !response.isArray()) {
         throw new NewsSourceException("INVALID_GITHUB_RESPONSE");
       }
@@ -86,6 +95,8 @@ public class GithubReleaseNewsSource implements OfficialNewsSource {
       return List.copyOf(results);
     } catch (BusinessException | NewsSourceException e) {
       throw e;
+    } catch (ExternalCallRejectedException e) {
+      throw new NewsSourceException("GITHUB_CIRCUIT_OPEN", e);
     } catch (RestClientException e) {
       log.warn("GitHub release collection failed: {}", e.getClass().getSimpleName());
       throw new NewsSourceException("GITHUB_UNAVAILABLE", e);

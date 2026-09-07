@@ -1,5 +1,7 @@
 package com.assetdashboard.infra.price.crypto;
 
+import com.assetdashboard.global.resilience.ExternalCallResilience;
+import com.assetdashboard.global.resilience.ExternalSource;
 import com.assetdashboard.infra.price.PriceProperties;
 import com.assetdashboard.infra.price.PriceProviderException;
 import com.assetdashboard.infra.price.PriceProviderException.Kind;
@@ -23,6 +25,7 @@ public class UpbitExchangeRateClient {
 
   private final RestClient priceRestClient;
   private final PriceProperties properties;
+  private final ExternalCallResilience resilience;
 
   /**
    * KRW-USDT 환율을 조회한다.
@@ -36,13 +39,18 @@ public class UpbitExchangeRateClient {
           Kind.PROVIDER_UNAVAILABLE, "외부 시세 조회가 비활성화되어 있습니다. (app.price.external-enabled=false)");
     }
     try {
-      JsonNode body = priceRestClient.get().uri(TICKER_URL).retrieve().body(JsonNode.class);
-      JsonNode price = body == null ? null : body.path(0).path("trade_price");
-      if (price == null || price.isMissingNode() || price.isNull()) {
-        throw new PriceProviderException(
-            Kind.PROVIDER_UNAVAILABLE, "Upbit KRW-USDT 응답에 가격이 없습니다.");
-      }
-      return price.decimalValue();
+      return resilience.executeRead(
+          ExternalSource.UPBIT,
+          () -> {
+            JsonNode body =
+                priceRestClient.get().uri(TICKER_URL).retrieve().body(JsonNode.class);
+            JsonNode price = body == null ? null : body.path(0).path("trade_price");
+            if (price == null || price.isMissingNode() || price.isNull()) {
+              throw new PriceProviderException(
+                  Kind.PROVIDER_UNAVAILABLE, "Upbit KRW-USDT 응답에 가격이 없습니다.");
+            }
+            return price.decimalValue();
+          });
     } catch (PriceProviderException e) {
       throw e;
     } catch (Exception e) {

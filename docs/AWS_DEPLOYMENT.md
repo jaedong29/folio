@@ -33,7 +33,7 @@ cp deploy/aws/.env.example deploy/aws/.env
 chmod 600 deploy/aws/.env
 ```
 
-`deploy/aws/.env`의 `APP_JWT_SECRET`, `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`를 실제 랜덤 값으로 바꾼다. 감사 로그·Agent Trace·평가 배치 보존 기간은 각각 `APP_RETENTION_AUDIT_LOG_DAYS`, `APP_RETENTION_AGENT_TRACE_DAYS`, `APP_RETENTION_EVALUATION_BATCH_DAYS`로 조정할 수 있으며 기본값은 365/30/90일이다. 이 파일은 커밋하거나 채팅에 붙여넣지 않는다.
+`deploy/aws/.env`의 `APP_JWT_SECRET`, `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`를 실제 랜덤 값으로 바꾼다. 감사 로그·Agent Trace·평가 배치 보존 기간은 각각 `APP_RETENTION_AUDIT_LOG_DAYS`, `APP_RETENTION_AGENT_TRACE_DAYS`, `APP_RETENTION_EVALUATION_BATCH_DAYS`로 조정할 수 있으며 기본값은 365/30/90일이다. 외부 GET의 최초 호출 포함 최대 시도 횟수는 `APP_RESILIENCE_YAHOO_MAX_ATTEMPTS`, `APP_RESILIENCE_BINANCE_MAX_ATTEMPTS`, `APP_RESILIENCE_UPBIT_MAX_ATTEMPTS`, `APP_RESILIENCE_GITHUB_MAX_ATTEMPTS`로 출처별 조정한다. 이 파일은 커밋하거나 채팅에 붙여넣지 않는다.
 
 ## 3. 배포 실행
 
@@ -60,6 +60,16 @@ B=http://EC2_PUBLIC_IP:8080 bash scripts/verify-account.sh
 ```
 
 외부 시세 장애는 EC2의 `.env`에서 `APP_PRICE_EXTERNAL_ENABLED=false`로 바꾼 뒤 앱을 재배포해 재현한다. AWS에서는 앱 로그와 dashboard 응답의 `priceStale`를 확인한다.
+
+Circuit Breaker와 Retry 지표는 로그인 Access Token을 사용한 인증 요청으로 확인한다. `/actuator/health`만
+공개이며 metrics는 일반 API와 마찬가지로 인증이 필요하다.
+
+```bash
+curl -H "Authorization: Bearer $ACCESS_TOKEN" \
+  http://EC2_PUBLIC_IP:8080/actuator/metrics/resilience4j.circuitbreaker.calls
+curl -H "Authorization: Bearer $ACCESS_TOKEN" \
+  http://EC2_PUBLIC_IP:8080/actuator/metrics/resilience4j.retry.calls
+```
 
 ## 5. 재시작·보존 검증
 
