@@ -506,6 +506,51 @@ stale/unavailable fallback을 HTTP로 다시 확인했다.
 
 ---
 
+## 3-7. GitHub Actions major 정리 — 최신 숫자가 아니라 현재 안정판을 선택
+
+### 무엇을 했나
+CI의 두 checkout을 `actions/checkout@v4`에서 `@v7`로, Gradle 설정을
+`gradle/actions/setup-gradle@v4`에서 `@v6`로 올렸다. `actions/setup-java`는 `@v5`를 유지했다. 공식 main
+문서 일부에는 v6 예시가 먼저 보이지만, advanced usage는 v6가 아직 개발 중이며 production workflow에는 최신
+안정 `@v5`를 쓰라고 명시하기 때문이다.
+
+setup-gradle v6는 기본 enhanced cache provider를 선택할 수 있지만, private 저장소에서도 동작 경계와 데이터
+경로가 분명한 `cache-provider: basic`을 명시했다. 이 경로는 기존 GitHub `actions/cache` 기반이고, 빌드는 계속
+저장소의 Gradle Wrapper를 실행한다.
+
+### 왜 그렇게 했나
+기존 실제 CI가 `actions/checkout@v4`의 Node.js 20 폐기 경고를 냈다. 경고만 숨기는 것이 아니라 Node.js 24
+런타임을 사용하는 현재 안정 major로 올려 runner 강제 호환에 기대지 않게 했다. 반면 모든 액션의 major 숫자를
+기계적으로 맞추면 아직 안정 release가 아닌 setup-java까지 `main` 또는 미발행 v6로 가져오게 된다. CI 공급망은
+새 숫자보다 발표된 안정 tag와 실제 runner 검증이 우선이다.
+
+### 검토한 대안
+| 대안 | 왜 채택하지 않았나 |
+|---|---|
+| 세 액션을 모두 v6으로 통일 | checkout 최신 안정판은 v7이고 setup-java v6는 아직 production release가 아니다 |
+| setup-java `@main` 사용 | 움직이는 branch라 같은 커밋의 CI 재현성과 공급망 경계가 약해진다 |
+| setup-gradle v6 기본 enhanced cache | private 저장소 preview에 굳이 캐시 제공자와 데이터 경로를 추가할 이유가 없다 |
+| 모든 액션을 commit SHA로 고정 | 공급망 고정은 강하지만 Dependabot/Renovate 없이 보안 업데이트 추적 부담이 커 현재 운영 방식보다 무겁다 |
+
+### 실제 확인 결과
+커밋 `497e86d` push 뒤 GitHub Actions run
+[`34083872948`](https://github.com/jaedong29/folio/actions/runs/34083872948)에서 checkout, JDK 17, setup-gradle,
+전체 H2 테스트, secret-scan, 각 post step이 모두 성공했다. 이전 run에 있던 Node.js 20 deprecated annotation도
+새 run에는 발생하지 않았다.
+
+### 실무자가 물어볼 만한 지점
+- **"왜 setup-java만 v5인가?"**
+  → 2026-09-07 공식 문서가 production에는 v5를 권장하고 v6는 개발 중이라고 명시한다. v6 안정 tag가 실제
+  발표되면 그때 독립적으로 올리고 runner에서 검증한다.
+- **"major tag는 안전한가?"**
+  → patch를 자동 수신하는 운영 편의와 commit SHA 고정의 공급망 안정성 사이 절충이다. 조직 정책이 SHA 고정을
+  요구하면 Dependabot과 함께 전환해야 업데이트를 놓치지 않는다.
+- **"basic cache가 느리지 않나?"**
+  → enhanced provider보다 성능상 불리할 수 있지만 현재 230개 테스트 CI는 2분 18초에 통과했다. 개인 private
+  저장소에서는 이 정도 시간보다 단순하고 공개된 캐시 경계를 우선했다.
+
+---
+
 ## 4. 외부 시세 조회 — 트랜잭션 경계가 핵심
 
 ### 무엇을 했나

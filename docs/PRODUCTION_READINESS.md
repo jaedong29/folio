@@ -8,7 +8,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 | 항목 | 구현 | 참고 |
 |---|---|---|
-| CI | push·PR마다 `./gradlew clean test` + API 키 패턴 검사 자동 실행 | `.github/workflows/ci.yml` |
+| CI | push·PR마다 `./gradlew clean test` + API 키 패턴 검사 자동 실행. `checkout@v7`, 안정판 `setup-java@v5`, `setup-gradle@v6`(basic cache) 조합을 실제 GitHub run 34083872948에서 검증하고 Node 20 폐기 경고 제거 | `.github/workflows/ci.yml` |
 | LLM 비용 거버넌스 | Financial Evidence Agent와 News 요약이 하루 호출 수·토큰 사용량 카운터를 공유, 초과 시 `429 AI_BUDGET_EXCEEDED`로 실제 호출 전에 차단 | `evidence/agent/LlmUsageBudgetService.java`, `GET /api/ai/usage/today` |
 | 인증 세션 관리 | Access Token 30분 + 회전·폐기되는 Refresh Token(SHA-256 해시 저장). 로그인 family의 절대 수명은 기본 14일로 회전해도 연장되지 않고, 과거 token 재사용 시 family 전체 폐기. 로그아웃·비밀번호 변경·회원 탈퇴가 실제 세션과 family 데이터를 정리 | `global/security/RefreshTokenService.java`, `RefreshTokenFamily.java` |
 | 비밀 관리 | API 키·JWT Secret은 환경변수로만 주입, 코드·설정 파일에 저장하지 않음. `prod` 프로필은 `APP_JWT_SECRET` 없으면 기동 자체가 실패 | `application.yml`, `JwtTokenProvider.java` |
@@ -52,13 +52,17 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 - **골든셋 커버리지가 거의 끝났지만 2개가 남았다.** 금융 Evidence 골든셋 18개 중 16개는 실제 NIM으로 실행 가능하다. 남은 `news-correlation`(한 질문에 `getAssetEvidence`+`searchSymbolEvidence` 두 Tool 결과를 합쳐야 함)과 `future-document`(질문 속 날짜로 `publishedAt`을 필터링해야 함)는 질문당 Tool을 하나만 호출하는 현재 Agent 구조로는 풀리지 않는다. 멀티 Tool 체이닝은 비용·지연이 늘어나는 설계 변경이라 의도적으로 미뤘다.
 - **뉴스 출처가 하나다.** 실제로 수집하는 출처는 Zcash Foundation의 Zebra GitHub Releases뿐이라, 화면의 Companies/Macro/FX/Geopolitics 분류는 아직 계약(향후 Adapter를 위한 인터페이스)일 뿐 실제 커버리지가 아니다.
 
-## 지금부터 순서대로 하나만 고른다면
+## 다음 우선순위
 
-1. **GitHub Actions major 업데이트.** 정합성·보안 수정이 끝났으므로 `setup-java`, `checkout`, `setup-gradle`을 공식 최신 안정 major로 함께 올리고 실제 GitHub 실행을 확인한다.
+앞서 정한 Production Readiness 순서의 거래 멱등성, Refresh Token 수명·정리, Graceful shutdown, 감사 로그,
+운영 기록 보존, 외부 API 장애 격리, CI major 정리는 모두 구현과 실제 검증을 마쳤다. 다음 항목은 아래 남은 갭을
+기계적으로 위에서부터 구현하지 않고, 실제 사용 중 확인되는 불편이나 운영 계획이 생겼을 때 그 영향도를 기준으로
+사용자와 다시 고른다.
 
-CI의 `actions/setup-java@v5` 전환은 실제 GitHub 실행에 성공해 현재 기능 문제는 없다. 다만 2026-09-07 기준
-공식 최신 안정판은 v6이고 `actions/checkout`, `gradle/actions/setup-gradle`도 새 major가 있으므로, 위 정합성·보안
-수정 뒤 별도 유지보수 커밋으로 함께 갱신한다.
+2026-09-07 공식 문서 확인 결과 `actions/checkout`은 v7, `gradle/actions/setup-gradle`은 v6가 현재 안정
+major다. `actions/setup-java` v6는 아직 개발 중이라 production 권장 v5를 유지했다. 변경 후 실제 GitHub run
+[`34083872948`](https://github.com/jaedong29/folio/actions/runs/34083872948)이 성공했고 기존 Node.js 20 폐기
+경고가 사라졌다.
 
 다중 인스턴스 대비 분산 락과 `news-correlation`/`future-document` 멀티 Tool 체이닝은 실제 확장 계획이 생기기
 전까지 계속 미룬다. 지금 단일 인스턴스 개인 MVP에는 각각 인프라·비용·지연 대비 우선순위가 낮다.
