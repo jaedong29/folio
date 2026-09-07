@@ -1,9 +1,10 @@
 package com.assetdashboard.evidence.evaluation;
 
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.util.Collection;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -23,6 +24,14 @@ public interface LiveEvaluationBatchJobRepository
 
   Optional<LiveEvaluationBatchJob> findFirstByUserIdAndStatusInOrderByCreatedAtDesc(
       Long userId, Collection<LiveEvaluationBatchStatus> statuses);
+
+  @Query(
+      "select j.id from LiveEvaluationBatchJob j "
+          + "where j.status in :statuses and j.completedAt < :cutoff order by j.id")
+  List<Long> findIdsByStatusInAndCompletedAtBefore(
+      @Param("statuses") Collection<LiveEvaluationBatchStatus> statuses,
+      @Param("cutoff") Instant cutoff,
+      Pageable pageable);
 
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select j from LiveEvaluationBatchJob j where j.status = :status order by j.createdAt asc")

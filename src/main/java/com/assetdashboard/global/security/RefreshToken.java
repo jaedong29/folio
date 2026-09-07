@@ -34,10 +34,10 @@ public class RefreshToken {
   @Column(name = "user_id", nullable = false)
   private Long userId;
 
-  @Column(name = "family_id", nullable = false, length = 36)
+  @Column(name = "family_id", nullable = false, length = 36, columnDefinition = "CHAR(36)")
   private String familyId;
 
-  @Column(name = "token_hash", nullable = false, length = 64)
+  @Column(name = "token_hash", nullable = false, length = 64, columnDefinition = "CHAR(64)")
   private String tokenHash;
 
   @Column(name = "issued_at", nullable = false)

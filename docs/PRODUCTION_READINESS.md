@@ -23,6 +23,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 | Refresh Token family 수명·정리 | family 상태와 절대 만료를 별도 row로 관리하고 회전해도 기본 14일 한도를 연장하지 않음. 활성 family의 과거 token hash는 재사용 탐지를 위해 보존하고, family 절대 만료 7일 뒤 token과 family를 함께 삭제 | `RefreshTokenFamily.java`, `V12__refresh_token_families.sql`, `RefreshTokenService.evictExpiredTokens()` |
 | Graceful shutdown | SIGTERM 수신 시 새 요청을 받지 않고 진행 중인 요청을 최대 30초까지 기다린 뒤 종료. Docker 종료 유예는 35초로 두어 애플리케이션보다 먼저 SIGKILL하지 않게 함 | `application.yml`, `docker-compose.yml`, `deploy/aws/docker-compose.yml` |
 | 민감 액션 감사 로그 | 비밀번호 변경·회원 탈퇴 성공을 내부 사용자 id·액션·시각만 별도 append-only 테이블에 기록. 업무 변경과 같은 트랜잭션에 참여해 실패한 변경을 성공으로 기록하지 않고, users FK를 두지 않아 탈퇴 후에도 보존 | `global/audit`, `V10__audit_logs.sql`, `UserAccountService.java` |
+| 감사·Trace·평가 기록 보존 | 감사 로그 365일, 일반 Agent Trace 30일, 완료·실패 평가 배치 90일의 운영 기본값을 두고 매일 500건 단위 SQL로 자동 정리. 보존 중인 평가 배치가 참조하는 Trace와 진행 중인 배치는 삭제하지 않으며 기간은 환경변수로 조정. 격리 MySQL에서 V1~V13, 운영 schema validation, 실제 Scheduler 삭제까지 확인 | `global/retention`, `V13__retention_cleanup_indexes.sql` |
 
 ## 남은 갭
 
@@ -45,7 +46,7 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 - **분산 트레이싱이 없다.** Agent Trace는 자체 DB 테이블에만 남고, OpenTelemetry 같은 표준 트레이싱으로 내보내지 않는다. 외부 APM(Grafana, Datadog 등) 연동도 없다.
 - **구조화된 로깅이 아니다.** 기본 Spring Boot 로그 포맷을 그대로 쓴다. 로그 집계 시스템(예: ELK)에 붙이려면 JSON 로깅으로 바꿔야 한다.
-- **Trace·로그 보존 기간이 정해져 있지 않다.** Agent Trace, 평가 배치, 감사 로그가 무기한 쌓인다. 실제 운영 전 법적 요구와 탈퇴 정책에 맞춘 보존·삭제 기간이 필요하다.
+- **애플리케이션 로그의 외부 보존 정책은 배포 환경에 맡겨져 있다.** DB의 감사·Agent Trace·평가 배치는 기간과 삭제 작업을 정했지만, stdout 로그는 별도 집계·보존 시스템이 없다. **현재 단일 EC2/Docker 스테이징에는 중앙 로그 저장소가 없어서다.**
 
 ### 데이터 · 컴플라이언스
 
@@ -54,8 +55,8 @@ Folio는 지금 개인 포트폴리오/MVP 단계입니다. 이 문서는 "코�
 
 ## 지금부터 순서대로 하나만 고른다면
 
-1. **감사·Agent Trace·평가 기록의 보존 기간 확정.** 감사 로그를 만들었으므로 무기한 보존을 그대로 두지 말고, 실제 운영 정책과 개인정보 처리방침을 기준으로 기간·접근권한·삭제 작업을 정한다.
-2. **외부 API Circuit Breaker와 source별 재시도.** 단일 인스턴스에서도 Yahoo/Binance/Upbit/NIM 장애 전파를 줄이는 실효가 있다. retry 가능한 오류와 즉시 실패할 오류를 먼저 분리한 뒤 도입한다.
+1. **외부 API Circuit Breaker와 source별 재시도.** 단일 인스턴스에서도 Yahoo/Binance/Upbit/NIM 장애 전파를 줄이는 실효가 있다. retry 가능한 오류와 즉시 실패할 오류를 먼저 분리한 뒤 도입한다.
+2. **GitHub Actions major 업데이트.** 정합성·보안 수정이 끝난 뒤 `setup-java`, `checkout`, `setup-gradle`을 공식 최신 안정 major로 함께 올리고 실제 GitHub 실행을 확인한다.
 
 CI의 `actions/setup-java@v5` 전환은 실제 GitHub 실행에 성공해 현재 기능 문제는 없다. 다만 2026-09-05 기준
 공식 최신 안정판은 v6이고 `actions/checkout`, `gradle/actions/setup-gradle`도 새 major가 있으므로, 위 정합성·보안

@@ -21,6 +21,7 @@ import lombok.NoArgsConstructor;
 @Table(
     name = "audit_logs",
     indexes = {
+      @Index(name = "idx_audit_created", columnList = "created_at"),
       @Index(name = "idx_audit_subject_created", columnList = "subject_user_id, created_at"),
       @Index(name = "idx_audit_action_created", columnList = "action, created_at")
     })

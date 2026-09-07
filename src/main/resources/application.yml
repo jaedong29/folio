@@ -47,6 +47,12 @@ app:
     login-lockout-minutes: ${APP_AUTH_LOGIN_LOCKOUT_MINUTES:15}
     max-requests-per-ip-per-window: ${APP_AUTH_MAX_REQUESTS_PER_IP:20}
     ip-window-seconds: ${APP_AUTH_IP_WINDOW_SECONDS:60}
+  retention:
+    # 개인 MVP의 운영 기본값이다. 법적 확정값이 아니며 운영 정책에 맞춰 환경변수로 조정한다.
+    audit-log-days: ${APP_RETENTION_AUDIT_LOG_DAYS:365}
+    agent-trace-days: ${APP_RETENTION_AGENT_TRACE_DAYS:30}
+    evaluation-batch-days: ${APP_RETENTION_EVALUATION_BATCH_DAYS:90}
+    cleanup-delay-millis: ${APP_RETENTION_CLEANUP_DELAY_MILLIS:86400000}
   price:
     cache-ttl-minutes: 15
     timeout-millis: 2000

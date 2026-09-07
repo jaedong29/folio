@@ -22,7 +22,10 @@ import lombok.NoArgsConstructor;
 @Table(
     name = "ai_agent_runs",
     uniqueConstraints = @UniqueConstraint(name = "uk_ai_run_trace", columnNames = "trace_id"),
-    indexes = @Index(name = "idx_ai_run_user_created", columnList = "user_id, created_at"))
+    indexes = {
+      @Index(name = "idx_ai_run_created", columnList = "created_at"),
+      @Index(name = "idx_ai_run_user_created", columnList = "user_id, created_at")
+    })
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AgentTraceRun extends BaseCreatedEntity {
 

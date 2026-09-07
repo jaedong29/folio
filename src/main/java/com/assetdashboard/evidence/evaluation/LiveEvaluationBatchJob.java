@@ -27,7 +27,8 @@ import lombok.NoArgsConstructor;
     uniqueConstraints = @UniqueConstraint(name = "uk_live_eval_batch", columnNames = "batch_id"),
     indexes = {
       @Index(name = "idx_live_eval_user_created", columnList = "user_id, created_at"),
-      @Index(name = "idx_live_eval_status_created", columnList = "status, created_at")
+      @Index(name = "idx_live_eval_status_created", columnList = "status, created_at"),
+      @Index(name = "idx_live_eval_status_completed", columnList = "status, completed_at")
     })
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class LiveEvaluationBatchJob extends BaseCreatedEntity {

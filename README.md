@@ -178,7 +178,7 @@ SELL : 투자 자산 감소 + 같은 통화 대기자금 증가
 
 Access Token은 탈취돼도 피해가 작도록 짧게 유지합니다(기본 30분, `APP_JWT_EXPIRATION_MINUTES`). 세션 연장은 서버가 저장·회전(rotate)·폐기(revoke)할 수 있는 Refresh Token이 맡습니다. 재발급마다 값은 바뀌지만 로그인 family의 절대 만료(기본 14일)는 연장되지 않습니다. 이미 회전에 쓰여 폐기된 토큰이 다시 들어오면 탈취로 간주해 같은 로그인 family를 모두 폐기하고 재로그인을 요구합니다. 활성 family의 과거 token hash는 재사용 탐지를 위해 유지하고, family 절대 만료 7일 뒤에 함께 삭제합니다. 로그아웃(`POST /api/auth/logout`)은 해당 로그인 family를, 비밀번호 변경은 모든 family를 폐기하며 회원 탈퇴는 token과 family 데이터를 삭제합니다 — 다만 이미 발급된 Access Token은 무상태 JWT라 자체 만료 시각까지는 계속 유효하므로, 그 노출 창을 좁게 유지하는 것이 이 설계의 핵심입니다. 토큰 원문은 저장하지 않고 SHA-256 해시만 저장합니다.
 
-비밀번호 변경과 회원 탈퇴가 성공하면 별도 `audit_logs` 테이블에 내부 사용자 id·액션·시각만 기록합니다. 비밀번호·이메일·요청 본문은 남기지 않으며, 회원 탈퇴 뒤에도 이 최소 감사 기록은 보존됩니다. 현재 보존 기간은 정하지 않았으므로 실제 운영 전 법적 요구와 개인정보 처리방침에 맞춰 확정해야 합니다.
+비밀번호 변경과 회원 탈퇴가 성공하면 별도 `audit_logs` 테이블에 내부 사용자 id·액션·시각만 기록합니다. 비밀번호·이메일·요청 본문은 남기지 않으며, 회원 탈퇴 뒤에도 이 최소 감사 기록은 기본 365일 보존됩니다. 일반 Agent Trace는 30일, 완료·실패한 Live 평가 배치는 90일 보존하고 매일 자동 정리합니다. 아직 보존 중인 평가 배치가 참조하는 Trace와 진행 중인 배치는 삭제하지 않습니다. 세 기간은 `APP_RETENTION_AUDIT_LOG_DAYS`, `APP_RETENTION_AGENT_TRACE_DAYS`, `APP_RETENTION_EVALUATION_BATCH_DAYS`로 조정할 수 있으며, 이 값은 개인 MVP의 운영 기본값이지 법적 확정값은 아닙니다.
 
 로그인은 같은 이메일로 5회 연속 실패하면 15분 잠기고(`APP_AUTH_MAX_LOGIN_ATTEMPTS`, `APP_AUTH_LOGIN_LOCKOUT_MINUTES`), 같은 IP의 `/api/auth/**` 요청 전체는 60초에 20회로 제한합니다(`APP_AUTH_MAX_REQUESTS_PER_IP`, `APP_AUTH_IP_WINDOW_SECONDS`). 둘 다 단일 인스턴스 메모리 상태이며, 인스턴스를 늘리면 공유 저장소로 옮겨야 합니다.
 

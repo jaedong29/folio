@@ -33,7 +33,7 @@ cp deploy/aws/.env.example deploy/aws/.env
 chmod 600 deploy/aws/.env
 ```
 
-`deploy/aws/.env`의 `APP_JWT_SECRET`, `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`를 실제 랜덤 값으로 바꾼다. 이 파일은 커밋하거나 채팅에 붙여넣지 않는다.
+`deploy/aws/.env`의 `APP_JWT_SECRET`, `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`를 실제 랜덤 값으로 바꾼다. 감사 로그·Agent Trace·평가 배치 보존 기간은 각각 `APP_RETENTION_AUDIT_LOG_DAYS`, `APP_RETENTION_AGENT_TRACE_DAYS`, `APP_RETENTION_EVALUATION_BATCH_DAYS`로 조정할 수 있으며 기본값은 365/30/90일이다. 이 파일은 커밋하거나 채팅에 붙여넣지 않는다.
 
 ## 3. 배포 실행
 

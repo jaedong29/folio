@@ -11,6 +11,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.List;
@@ -25,7 +26,8 @@ import lombok.NoArgsConstructor;
     uniqueConstraints =
         @UniqueConstraint(
             name = "uk_live_eval_batch_case",
-            columnNames = {"batch_job_id", "case_id"}))
+            columnNames = {"batch_job_id", "case_id"}),
+    indexes = @Index(name = "idx_live_eval_case_trace", columnList = "trace_id"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class LiveEvaluationBatchCaseResult extends BaseCreatedEntity {
 

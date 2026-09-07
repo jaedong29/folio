@@ -22,7 +22,7 @@ import lombok.NoArgsConstructor;
 public class RefreshTokenFamily {
 
   @Id
-  @Column(name = "family_id", length = 36)
+  @Column(name = "family_id", length = 36, columnDefinition = "CHAR(36)")
   private String familyId;
 
   @Column(name = "user_id", nullable = false)
