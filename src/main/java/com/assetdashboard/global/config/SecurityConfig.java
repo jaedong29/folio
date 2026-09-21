@@ -74,7 +74,20 @@ public class SecurityConfig {
         .formLogin(form -> form.disable())
         .httpBasic(basic -> basic.disable())
         // H2 콘솔이 frame 을 쓰므로 same-origin 만 허용한다.
-        .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
+        .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin())
+            .addHeaderWriter((request, response) -> {
+              // Protect the application document without breaking Swagger/H2's separate UIs.
+              String path = request.getServletPath();
+              if (path.isEmpty()) path = request.getRequestURI().substring(request.getContextPath().length());
+              if (path.equals("/") || path.equals("/index.html") || path.equals("/login.html")) {
+                response.setHeader("Content-Security-Policy",
+                    "default-src 'self'; script-src 'self'; script-src-attr 'none'; "
+                    + "connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                    + "font-src 'self'; object-src 'none'; base-uri 'none'; "
+                    + "form-action 'self'; frame-ancestors 'none'");
+                response.setHeader("Referrer-Policy", "no-referrer");
+              }
+            }))
         .authorizeHttpRequests(
             auth ->
                 auth.requestMatchers(HttpMethod.OPTIONS, "/**")

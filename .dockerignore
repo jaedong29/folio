@@ -1,0 +1,11 @@
+.git
+.gradle
+build
+.idea
+.claude
+.folio-local
+**/.env
+**/.env.*
+deploy/aws/backups
+**/*.pem
+**/*.key

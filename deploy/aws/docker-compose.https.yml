@@ -1,0 +1,32 @@
+# Activate with COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml in .env.
+# !override requires Docker Compose >= 2.24.4; do not replace it with a plain list.
+services:
+  app:
+    ports: !override
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    environment:
+      # Only the local host and the Docker network can reach the app directly.
+      # Caddy overwrites client-supplied forwarding headers before passing them on.
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      FOLIO_DOMAIN: ${FOLIO_DOMAIN:?Set FOLIO_DOMAIN in deploy/aws/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

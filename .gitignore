@@ -1,6 +1,7 @@
 HELP.md
 .gradle
 build/
+.claude/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
@@ -42,6 +43,8 @@ out/
 .env
 .env.*
 !.env.example
+# Persistent local account-connection data and server secrets
+/.folio-local/
 # AWS deployment database backups
 /deploy/aws/backups/
 # scripts/export-code-to-markdown.sh 산출물 (생성 파일, 저장소에 추적하지 않음)
