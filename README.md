@@ -4,7 +4,7 @@
 
 Folio는 증권 주문 앱이나 금융기관 연동 서비스가 아닙니다. 사용자가 보유 자산과 거래를 직접 기록하면 외부 시세와 환율을 결합해 원화 기준 Portfolio를 보여주는 **수동 입력형 MVP**입니다.
 
-이 프로젝트의 목표는 기능을 크게 확장하는 것이 아니라 다음 질문에 답할 수 있는 작은 제품을 만드는 것이었습니다.
+이 프로젝트는 기능을 크게 확장하기보다 다음 질문에 답할 수 있는 작은 제품을 만드는 것을 목표로 합니다.
 
 - 여러 앱에 흩어진 자산을 한눈에 볼 수 있는가?
 - USD·USDT·KRW 자산의 원가와 현재 가치를 혼동하지 않고 계산할 수 있는가?
@@ -427,14 +427,4 @@ MyData·지갑 자동 연동·주문 실행은 이 MVP의 문제 정의를 벗�
 | [Agent Trace & Minimum Harness](docs/AGENT_TRACE_EVALUATION_HARNESS.md) | Run·Span 트리, 규칙 채점, 민감정보 경계와 남은 사용자 선택 |
 | [Shared News Feed](docs/SHARED_NEWS_FEED.md) | 공용 뉴스 저장소 구조, 비동기 수집·중복 제거, 현재 실제 수집 범위 |
 | [Production Readiness](docs/PRODUCTION_READINESS.md) | 실제 운영 가정 시 완료된 항목과 남은 갭, 우선순위 |
-| [Handoff](docs/HANDOFF_2026-08-10.md) | 다른 환경에서 이어서 작업하기 위한 인수인계 기록 |
-
-## 발표에서 받고 싶은 피드백
-
-- 수동 입력형 Portfolio MVP에서 Aggregate와 거래 replay의 경계가 적절한가?
-- 현재의 Unknown Preservation 원칙이 사용자 편의와 데이터 정합성 사이에서 균형적인가?
-- 사용자별·통화별 정산 자산에 낙관적 락을 유지한 판단이 합리적인가?
-- 다음 리팩터링에서 `Asset`을 어떤 책임 단위로 분리하는 것이 가장 효과적인가?
-- 공식 시세 Provider로 교체할 때 현재 인터페이스 경계가 충분한가?
-
 구현 중 발견한 문제와 판단 과정은 [Implementation Notes](docs/IMPLEMENTATION_NOTES.md)에 가장 자세히 기록했습니다.
