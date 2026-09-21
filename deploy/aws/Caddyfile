@@ -1,0 +1,21 @@
+{$FOLIO_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		-Server
+		>Strict-Transport-Security "max-age=86400"
+		>X-Content-Type-Options nosniff
+		>Referrer-Policy no-referrer
+	}
+
+	# Submission visitors need the product UI, not operational/evaluation endpoints.
+	@internal path /actuator /actuator/info /actuator/metrics* /actuator/env* /swagger-ui* /v3/api-docs* /h2-console* /api/ai/evaluations*
+	respond @internal 404
+
+	reverse_proxy app:8080 {
+		header_up -Forwarded
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}
