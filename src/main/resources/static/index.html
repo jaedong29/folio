@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0a0d12" />
   <title>Asset Dashboard</title>
-  <link rel="stylesheet" href="/css/app.css?v=20260903-2" />
+  <link rel="stylesheet" href="/css/app.css?v=20260911-2" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='26' fill='%235b8cff'/><path d='M27 66V46h12v20zm18 0V27h12v39zm18 0V37h12v29z' fill='white'/></svg>" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/js/vendor/chart.umd-4.4.1.js" integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG"></script>
 </head>
 <body>
 
@@ -80,7 +80,8 @@
         </button>
         <span class="nav-divider"></span>
         <nav class="topbar-nav" aria-label="주요 화면">
-          <button id="nav-overview" class="topbar-nav-link active" type="button">Overview</button>
+          <button id="nav-connected" class="topbar-nav-link active" type="button">연결 자산</button>
+          <button id="nav-overview" class="topbar-nav-link" type="button">직접 기록</button>
           <button id="nav-news" class="topbar-nav-link" type="button">News</button>
         </nav>
         <span id="nav-current" class="sr-only">Overview</span>
@@ -101,7 +102,29 @@
   </header>
 
   <main class="container">
-    <section id="overview-page">
+    <section id="connected-page" aria-labelledby="connected-title">
+      <div class="page-intro">
+        <div><p class="eyebrow">CONNECTED PORTFOLIO</p><h1 id="connected-title">투자를 한눈에</h1>
+          <p class="page-date">토스증권 주식과 바이낸스 현물을 한곳에서 확인하세요.</p></div>
+        <button type="button" id="connection-add" class="add-action">계좌 연결</button>
+      </div>
+      <p id="connected-error" class="error" role="status"></p>
+      <div id="connected-content" aria-live="polite"><p class="empty-row">연결 정보를 불러오고 있습니다.</p></div>
+      <dialog id="connection-dialog" class="connection-dialog" aria-labelledby="connection-dialog-title">
+        <form id="connection-form" autocomplete="off">
+          <div class="connection-dialog-head"><h2 id="connection-dialog-title">계좌 연결</h2>
+            <button type="button" id="connection-close" class="btn-ghost">닫기</button></div>
+          <label>연결할 곳<select id="connection-provider"><option value="TOSS">토스증권 · 국내/미국 주식</option><option value="BINANCE_SPOT">바이낸스 · 현물</option></select></label>
+          <p id="connection-help" class="connection-help"></p>
+          <label><span id="connection-key-label">Client ID</span><input id="connection-key" type="password" autocomplete="off" required minlength="8" maxlength="256" spellcheck="false" /></label>
+          <label><span id="connection-secret-label">Client Secret</span><input id="connection-secret" type="password" autocomplete="off" required minlength="8" maxlength="256" spellcheck="false" /></label>
+          <p class="connection-help">연결 정보는 암호화해 저장합니다. 테스트 후에는 바이낸스에서 API 키를 삭제하고, Folio에서도 연결을 해제해주세요. Folio 연결 해제만으로 바이낸스 키가 폐기되지는 않습니다.</p>
+          <p id="connection-form-error" class="error" role="alert"></p>
+          <button class="btn-primary" id="connection-save" type="submit">연결하고 자산 불러오기</button>
+        </form>
+      </dialog>
+    </section>
+    <section id="overview-page" hidden>
     <div class="page-intro">
       <div>
         <p class="eyebrow">MY PORTFOLIO</p>
@@ -517,6 +540,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="/js/app.js?v=20260903-2"></script>
+<script src="/js/connections.js?v=20260911-2"></script>
+<script src="/js/app.js?v=20260911-2"></script>
 </body>
 </html>

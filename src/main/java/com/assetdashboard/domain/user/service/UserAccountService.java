@@ -32,6 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class UserAccountService {
 
+  private final com.assetdashboard.connection.AccountConnectionRepository accountConnectionRepository;
+
   private final UserRepository userRepository;
   private final AssetRepository assetRepository;
   private final TransactionRepository transactionRepository;
@@ -95,6 +97,7 @@ public class UserAccountService {
       agentTraceRunRepository.deleteAllByUserId(userId);
     }
     evidenceDocumentRepository.deleteAllByUserId(userId);
+    accountConnectionRepository.deleteAllByUserId(userId);
     refreshTokenService.deleteAllForUser(userId);
     idempotencyKeyRepository.deleteAllByUserId(userId);
     if (!assetIds.isEmpty()) {

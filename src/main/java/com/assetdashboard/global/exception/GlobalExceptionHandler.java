@@ -72,7 +72,8 @@ public class GlobalExceptionHandler {
   /** 알 수 없는 JSON 필드는 오타 난 필드명과 사용 가능한 필드 목록을 함께 알려준다. */
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
-    log.warn("[InvalidRequest] {}", e.getMessage());
+    // Parser exceptions can contain fragments of credentials from a malformed JSON body.
+    log.warn("[InvalidRequest] malformed JSON");
     UnrecognizedPropertyException unknown = findCause(e, UnrecognizedPropertyException.class);
     if (unknown != null) {
       String available =

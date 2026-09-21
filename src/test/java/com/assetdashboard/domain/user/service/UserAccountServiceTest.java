@@ -41,6 +41,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 @ExtendWith(MockitoExtension.class)
 class UserAccountServiceTest {
 
+  @Mock private com.assetdashboard.connection.AccountConnectionRepository accountConnectionRepository;
+
   @Mock private UserRepository userRepository;
   @Mock private AssetRepository assetRepository;
   @Mock private TransactionRepository transactionRepository;
@@ -64,6 +66,7 @@ class UserAccountServiceTest {
   void setUp() {
     userAccountService =
         new UserAccountService(
+            accountConnectionRepository,
             userRepository,
             assetRepository,
             transactionRepository,

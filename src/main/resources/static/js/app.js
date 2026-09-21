@@ -34,6 +34,7 @@ const state = {
   detailAssetId: null,
   refreshPromise: null,
   tokenRefreshPromise: null,
+  sessionGeneration: 0,
   krSecurities: null,
   krSecuritiesPromise: null,
   privacyHidden: localStorage.getItem(PRIVACY_KEY) === 'true',
@@ -57,6 +58,7 @@ async function refreshAccessToken() {
   if (state.tokenRefreshPromise) return state.tokenRefreshPromise;
   const rt = refreshTokenValue();
   if (!rt) return false;
+  const generation = state.sessionGeneration;
 
   state.tokenRefreshPromise = (async () => {
     try {
@@ -66,29 +68,34 @@ async function refreshAccessToken() {
         body: JSON.stringify({ refreshToken: rt }),
       });
       if (!res.ok) return false;
-      storeSession(await res.json());
+      const session = await res.json();
+      if (generation !== state.sessionGeneration || refreshTokenValue() !== rt) return false;
+      storeSession(session);
       return true;
     } catch {
       return false;
     } finally {
-      state.tokenRefreshPromise = null;
+      if (generation === state.sessionGeneration) state.tokenRefreshPromise = null;
     }
   })();
   return state.tokenRefreshPromise;
 }
 
 async function api(path, options = {}, retriedAfterRefresh = false) {
+  const generation = state.sessionGeneration;
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   const t = token();
   if (t) headers.Authorization = `Bearer ${t}`;
 
   const res = await fetch(API + path, { ...options, headers });
+  if (generation !== state.sessionGeneration) throw new Error('로그인 상태가 변경되었습니다.');
 
   if (res.status === 401 && !retriedAfterRefresh && refreshTokenValue()) {
     if (await refreshAccessToken()) return api(path, options, true);
   }
 
   const text = await res.text();
+  if (generation !== state.sessionGeneration) throw new Error('로그인 상태가 변경되었습니다.');
   const data = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
@@ -116,6 +123,15 @@ const escapeHtml = (value) => String(value ?? '')
   .replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&#039;');
+
+function newRequestId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function signedWon(v) {
   if (v == null) return '-';
@@ -317,6 +333,22 @@ $('signup-form').addEventListener('submit', async (event) => {
 $('logout-btn').addEventListener('click', logout);
 
 function logout() {
+  state.sessionGeneration++;
+  state.tokenRefreshPromise = null;
+  state.refreshPromise = null;
+  state.dashboard = null;
+  state.assets = [];
+  state.portfolio = [];
+  state.analysisHistory = null;
+  state.analysisPortfolio = [];
+  state.activityTransactions = [];
+  state.detailAssetId = null;
+  $('dashboard-body').hidden = true;
+  ['cash-list', 'portfolio-list', 'activity-history-list'].forEach(id => $(id).replaceChildren());
+  $('drawer-backdrop').hidden = true;
+  $('modal-backdrop').hidden = true;
+  $('refresh-btn').disabled = false;
+  clearConnectedSession();
   clearTimeout(state.newsRefreshTimer);
   state.newsRefreshTimer = null;
   clearTimeout(state.newsSummaryTimer);
@@ -348,12 +380,14 @@ function enterApp() {
     year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
   }).format(new Date());
   syncPrivacyControl();
-  refresh();
+  if (!location.hash || location.hash === '#connected') showConnected(false);
+  else if (location.hash === '#manual') showOverview();
+  else { $('connected-page').hidden = true; refresh(); }
 }
 
 /* ── 렌더링 ────────────────────────────────────── */
 
-$('refresh-btn').addEventListener('click', () => refresh(true));
+$('refresh-btn').addEventListener('click', () => $('connected-page').hidden ? refresh(true) : refreshConnected());
 $('privacy-toggle').addEventListener('click', () => {
   state.privacyHidden = !state.privacyHidden;
   localStorage.setItem(PRIVACY_KEY, String(state.privacyHidden));
@@ -374,6 +408,7 @@ function syncPrivacyControl() {
 }
 
 function renderPrivacySensitiveViews() {
+  renderConnected();
   if (!state.dashboard) return;
   renderDashboard(state.dashboard, state.assets);
   renderPortfolio(state.portfolio);
@@ -389,6 +424,7 @@ function renderPrivacySensitiveViews() {
 function refresh(notify = false) {
   if (state.refreshPromise) return state.refreshPromise;
 
+  const generation = state.sessionGeneration;
   const refreshButton = $('refresh-btn');
   refreshButton.disabled = true;
   refreshButton.classList.add('is-loading');
@@ -403,6 +439,7 @@ function refresh(notify = false) {
         api('/api/portfolio' + (state.portfolioType ? `?type=${state.portfolioType}` : '')),
         api('/api/assets'),
       ]);
+      if (generation !== state.sessionGeneration) return;
       state.dashboard = dashboard;
       state.assets = assets;
       state.portfolio = portfolio;
@@ -424,9 +461,11 @@ function refresh(notify = false) {
       $('last-refresh-label').textContent = `대시보드 ${timeAgo(new Date().toISOString())}`;
       if (notify) toast('최신 시세로 갱신했습니다');
     } catch (err) {
+      if (generation !== state.sessionGeneration) return;
       $('last-refresh-label').textContent = '동기화 실패';
       toast(err.message);
     } finally {
+      if (generation !== state.sessionGeneration) return;
       refreshButton.disabled = false;
       refreshButton.classList.remove('is-loading');
       state.refreshPromise = null;
@@ -553,12 +592,12 @@ function renderPortfolio(items) {
       ? '평단 미입력'
       : `평단 ${num(a.avgPriceOriginal ?? a.avgPrice, 4)} ${a.avgPriceOriginal != null ? a.currency : 'KRW'}`}`;
     return `
-    <div class="row portfolio-row" data-asset-id="${a.assetId}" data-asset-name="${a.name}">
+    <div class="row portfolio-row" data-asset-id="${a.assetId}" data-asset-name="${escapeHtml(a.name)}">
       <div class="portfolio-asset">
         ${assetIcon(a.type, a.displaySymbol || a.symbol)}
         <div class="asset-name-block">
           <div class="asset-name-line">
-            <span class="asset-name">${a.name}</span>
+            <span class="asset-name">${escapeHtml(a.name)}</span>
             <span class="asset-symbol">${a.displaySymbol || a.symbol}</span>
           </div>
           <div class="asset-market">
@@ -568,13 +607,13 @@ function renderPortfolio(items) {
           </div>
           <button class="mobile-price-toggle" type="button" data-mobile-price-id="${a.assetId}" aria-expanded="${mobilePriceVisible}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.5"/></svg>
-            <span>${mobilePriceVisible ? currentPriceLabel : '현재가 보기'}</span>
+            <span>${mobilePriceVisible ? escapeHtml(currentPriceLabel) : '현재가 보기'}</span>
           </button>
         </div>
       </div>
       <div class="portfolio-position">
-        <div class="position-price">${a.currentPrice == null ? '현재가 -' : currentPriceLabel}</div>
-        <div class="position-quantity">${privateText(positionLabel)}</div>
+        <div class="position-price">${a.currentPrice == null ? '현재가 -' : escapeHtml(currentPriceLabel)}</div>
+        <div class="position-quantity">${escapeHtml(privateText(positionLabel))}</div>
       </div>
       <div class="portfolio-value">
         ${a.exchangeRateMissing
@@ -602,14 +641,14 @@ function renderCash(assets) {
     return (currencyOrder[a.currency] ?? 9) - (currencyOrder[b.currency] ?? 9);
   });
   list.innerHTML = ordered.map((a) => `
-    <div class="currency-card" data-asset-id="${a.id}" data-asset-name="${a.name}">
+    <div class="currency-card" data-asset-id="${a.id}" data-asset-name="${escapeHtml(a.name)}">
       ${currencyIcon(a.currency)}
       <div class="currency-copy">
-        <strong>${a.currency}${a.defaultSettlementAsset ? ' <span class="pill pill-market">기본</span>' : ''}</strong>
-        <small>${a.name}</small>
+        <strong>${escapeHtml(a.currency)}${a.defaultSettlementAsset ? ' <span class="pill pill-market">기본</span>' : ''}</strong>
+        <small>${escapeHtml(a.name)}</small>
       </div>
       <div class="currency-value">
-        <strong>${privateText(`${num(a.quantity, a.currency === 'KRW' ? 0 : 4)} ${a.currency}`)}</strong>
+        <strong>${escapeHtml(privateText(`${num(a.quantity, a.currency === 'KRW' ? 0 : 4)} ${a.currency}`))}</strong>
         <small class="${a.exchangeRateMissing ? 'rate-missing' : ''}">${a.exchangeRateMissing ? '환율 입력 필요' : privateText(won(a.valuationKRW))}</small>
       </div>
     </div>`).join('');
@@ -622,11 +661,11 @@ function renderRecent(transactions) {
     return;
   }
   list.innerHTML = transactions.map((t) => `
-    <div class="row activity-row" data-asset-id="${t.assetId}" data-asset-name="${t.assetName}">
+    <div class="row activity-row" data-asset-id="${t.assetId}" data-asset-name="${escapeHtml(t.assetName)}">
       <div class="activity-main">
         <span class="activity-icon ${isInboundTransaction(t.type) ? 'activity-icon-in' : 'activity-icon-out'}">${isInboundTransaction(t.type) ? '↙' : '↗'}</span>
         <div class="activity-copy">
-          <strong>${t.assetName} · ${transactionLabel(t.type)}</strong>
+          <strong>${escapeHtml(t.assetName)} · ${transactionLabel(t.type)}</strong>
           <small>${fmtDate(t.tradedAt)} · ${t.symbol}</small>
         </div>
       </div>
@@ -643,11 +682,11 @@ $('brand-home').addEventListener('click', () => {
   if (location.hash) {
     history.replaceState(null, '', location.pathname + location.search);
   }
-  showOverview();
+  showConnected();
 });
 
 $('nav-overview').addEventListener('click', () => {
-  if (location.hash) history.pushState({ view: 'overview' }, '', location.pathname + location.search);
+  history.pushState({ view: 'overview' }, '', '#manual');
   showOverview();
 });
 $('nav-news').addEventListener('click', () => showNews(true));
@@ -681,16 +720,19 @@ $('analysis-period-tabs').addEventListener('click', (event) => {
 });
 
 window.addEventListener('popstate', () => {
-  if (location.hash === '#analysis') showAnalysis(false);
+  if (!location.hash || location.hash === '#connected') showConnected(false);
+  else if (location.hash === '#analysis') showAnalysis(false);
   else if (location.hash === '#activity') showActivity(false);
   else if (location.hash === '#news') showNews(false);
   else showOverview();
 });
 
 function setPrimaryNavigation(page) {
+  $("nav-connected").classList.toggle("active", page === "connected");
+  if (page !== "connected") { $("connected-page").hidden = true; stopConnected(); }
   $('nav-overview').classList.toggle('active', page === 'overview');
   $('nav-news').classList.toggle('active', page === 'news');
-  $('nav-current').textContent = page === 'news'
+  $('nav-current').textContent = page === 'connected' ? '연결 자산' : page === 'news'
     ? 'News'
     : page === 'analysis'
       ? 'Analysis'
@@ -726,6 +768,7 @@ function showOverview() {
   $('news-page').hidden = true;
   $('overview-page').hidden = false;
   setPrimaryNavigation('overview');
+  if (!state.dashboard) refresh();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -989,7 +1032,7 @@ async function loadActivityData() {
       .sort((a, b) => new Date(b.tradedAt) - new Date(a.tradedAt) || b.id - a.id);
     renderActivityLedger();
   } catch (error) {
-    $('activity-history-list').innerHTML = `<div class="empty-row">${error.message}</div>`;
+    $('activity-history-list').innerHTML = `<div class="empty-row">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -1029,19 +1072,19 @@ function renderActivityLedger() {
       ? privateText(`${transaction.type === 'SELL' ? '+' : '−'}${num(transaction.settlementAmount, 4)} ${settlement.currency}`)
       : transaction.type === 'DEPOSIT' ? '외부 입금' : transaction.type === 'WITHDRAW' ? '외부 출금' : '-';
     return `
-      <div class="ledger-row" data-asset-id="${transaction.assetId}" data-asset-name="${transaction.assetName}">
+      <div class="ledger-row" data-asset-id="${transaction.assetId}" data-asset-name="${escapeHtml(transaction.assetName)}">
         <div class="ledger-asset">
           ${transaction.assetType === 'CASH' || transaction.assetType === 'BANK'
             ? currencyIcon(transaction.currency)
             : assetIcon(transaction.assetType, transaction.symbol)}
           <div class="ledger-copy">
-            <strong><span class="ledger-type ledger-type-${transaction.type}">${transactionLabel(transaction.type)}</span>${transaction.assetName}</strong>
-            <small>${transaction.symbol}${transaction.memo ? ` · ${transaction.memo}` : ''}</small>
+            <strong><span class="ledger-type ledger-type-${transaction.type}">${transactionLabel(transaction.type)}</span>${escapeHtml(transaction.assetName)}</strong>
+            <small>${transaction.symbol}${transaction.memo ? ` · ${escapeHtml(transaction.memo)}` : ''}</small>
           </div>
         </div>
         <div class="ledger-date"><strong>${fmtDate(transaction.tradedAt)}</strong><small>거래 시점</small></div>
-        <div class="ledger-amount"><strong class="${state.privacyHidden ? '' : inbound ? 'up' : 'down'}">${quantity}</strong><small>${transaction.price == null ? '잔액 변동' : privateText(`@ ${num(transaction.price, 4)} ${transaction.currency}`)}</small></div>
-        <div class="ledger-settlement"><strong>${settlementLabel}</strong><small>${settlement?.name || 'Portfolio 외부'}</small></div>
+        <div class="ledger-amount"><strong class="${state.privacyHidden ? '' : inbound ? 'up' : 'down'}">${escapeHtml(quantity)}</strong><small>${transaction.price == null ? '잔액 변동' : escapeHtml(privateText(`@ ${num(transaction.price, 4)} ${transaction.currency}`))}</small></div>
+        <div class="ledger-settlement"><strong>${escapeHtml(settlementLabel)}</strong><small>${escapeHtml(settlement?.name || 'Portfolio 외부')}</small></div>
       </div>`;
   }).join('') : '<div class="empty-row">조건에 맞는 거래 내역이 없습니다</div>';
 }
@@ -1238,7 +1281,7 @@ function renderAnalysisComposition() {
         <div class="composition-asset">
           ${assetIcon(asset.type, asset.displaySymbol || asset.symbol)}
           <div class="composition-copy">
-            <strong>${asset.name}</strong>
+            <strong>${escapeHtml(asset.name)}</strong>
             <small>${asset.displaySymbol || asset.symbol} · ${TYPE_LABEL[asset.type] || asset.type}</small>
           </div>
         </div>
@@ -1256,7 +1299,7 @@ function renderAnalysisRanking() {
     <div class="ranking-row" data-asset-id="${asset.assetId}">
       <span class="ranking-number">${index + 1}</span>
       <div class="ranking-copy">
-        <strong>${asset.name}</strong>
+        <strong>${escapeHtml(asset.name)}</strong>
         <small>${asset.displaySymbol || asset.symbol} · ${privateText(won(asset.valuationKRW))}</small>
       </div>
       <div class="ranking-value">
@@ -1316,9 +1359,9 @@ function renderPreview(previewId, result) {
     <div class="transaction-preview-head"><strong>저장 후 예상</strong><span>LIVE PREVIEW</span></div>
     <div class="transaction-preview-body">
       ${result.items.map((item) => `
-        <div class="preview-item"><span>${item.label}</span><strong class="${item.className || ''}">${item.value}</strong></div>`).join('')}
+        <div class="preview-item"><span>${escapeHtml(item.label)}</span><strong class="${item.className || ''}">${escapeHtml(item.value)}</strong></div>`).join('')}
     </div>
-    ${result.warning ? `<p class="preview-warning">${result.warning}</p>` : ''}
+    ${result.warning ? `<p class="preview-warning">${escapeHtml(result.warning)}</p>` : ''}
     <p class="preview-note">예상값이며 저장 후 서버의 평단·실현손익 계산이 최종 반영됩니다.</p>`;
 }
 
@@ -1459,7 +1502,7 @@ async function renderAssetDetail() {
         : Promise.resolve({ items: [], error: null }),
     ]);
     const evidenceDocuments = evidenceResult.items;
-    $('drawer-title').innerHTML = `${asset.name} <span class="row-sym">· ${asset.displaySymbol || asset.symbol}</span>`;
+    $('drawer-title').innerHTML = `${escapeHtml(asset.name)} <span class="row-sym">· ${asset.displaySymbol || asset.symbol}</span>`;
 
     const valuationLabel = asset.exchangeRateMissing ? '환율 입력 필요' : won(asset.valuationKRW);
     const pnlLabel = asset.unrealizedPnl == null
@@ -1541,7 +1584,7 @@ async function renderAssetDetail() {
           <div class="row" style="cursor:default">
             <div class="row-main">
               <div class="row-name"><span class="pill pill-${t.type}">${t.type}</span></div>
-              <div class="row-sub">${fmtDate(t.tradedAt)}${t.memo ? ' · ' + t.memo : ''}</div>
+              <div class="row-sub">${fmtDate(t.tradedAt)}${t.memo ? ' · ' + escapeHtml(t.memo) : ''}</div>
             </div>
             <div class="row-right">
               <div class="row-value">${num(t.quantity)}</div>
@@ -1555,7 +1598,7 @@ async function renderAssetDetail() {
     if (priceHistory?.available) renderAssetPriceChart(priceHistory);
     bindDetailActions(asset);
   } catch (err) {
-    $('drawer-body').innerHTML = `<div class="empty-row">${err.message}</div>`;
+    $('drawer-body').innerHTML = `<div class="empty-row">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -2023,7 +2066,7 @@ function openInlineTransactionForm(asset, kind, initialSide) {
     ? state.assets.filter((item) => (item.type === 'CASH' || item.type === 'BANK') && item.currency === asset.currency)
     : [];
   const settlementOptions = settlementAssets
-    .map((item) => `<option value="${item.id}">${item.name} · ${num(item.quantity)} ${item.currency}</option>`)
+    .map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${num(item.quantity)} ${item.currency}</option>`)
     .join('');
   $('drawer-title').textContent = `${asset.name} — ${isInvestment ? '거래 기록' : '잔액 조정'}`;
   document.querySelector('.asset-drawer').scrollTop = 0;
@@ -2135,7 +2178,7 @@ function openInlineTransactionForm(asset, kind, initialSide) {
   });
   syncInlinePreview();
 
-  const detailTxIdempotencyKey = crypto.randomUUID();
+  const detailTxIdempotencyKey = newRequestId();
   $('detail-tx-submit').addEventListener('click', async () => {
     const submitButton = $('detail-tx-submit');
     const error = $('drawer-error');
@@ -2765,7 +2808,7 @@ function openAssetForm() {
 
 function assetOptions(filter) {
   return state.assets.filter(filter)
-    .map((a) => `<option value="${a.id}">${a.name} (${a.displaySymbol || a.symbol})</option>`).join('');
+    .map((a) => `<option value="${a.id}">${escapeHtml(a.name)} (${a.displaySymbol || a.symbol})</option>`).join('');
 }
 
 function openTradeForm() {
@@ -2826,7 +2869,7 @@ function openTradeForm() {
       const settlements = state.assets.filter((a) =>
         (a.type === 'CASH' || a.type === 'BANK') && a.currency === selected?.currency);
       $('f-settlement').innerHTML = settlements.length
-        ? settlements.map((a) => `<option value="${a.id}">${a.name} · ${num(a.quantity)} ${a.currency}</option>`).join('')
+        ? settlements.map((a) => `<option value="${a.id}">${escapeHtml(a.name)} · ${num(a.quantity)} ${a.currency}</option>`).join('')
         : '<option value="">같은 통화의 대기자금이 없습니다</option>';
       $('f-settlement').disabled = !settlements.length;
     }
@@ -2852,7 +2895,7 @@ function openTradeForm() {
   $('f-date').addEventListener('change', () => syncTradeFields(false));
   syncTradeFields(true);
 
-  const tradeIdempotencyKey = crypto.randomUUID();
+  const tradeIdempotencyKey = newRequestId();
   $('f-submit').addEventListener('click', () => submit(async () => {
     const id = $('f-asset').value;
     const selected = state.assets.find((a) => String(a.id) === id);
@@ -2929,7 +2972,7 @@ function openCashForm() {
   $('f-date').addEventListener('change', () => syncCashFields(false));
   syncCashFields(true);
 
-  const cashIdempotencyKey = crypto.randomUUID();
+  const cashIdempotencyKey = newRequestId();
   $('f-submit').addEventListener('click', () => submit(async () => {
     const id = $('f-asset').value;
     const selected = state.assets.find((a) => String(a.id) === id);

@@ -35,6 +35,10 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  connections:
+    enabled: ${APP_CONNECTIONS_ENABLED:false}
+    encryption-key: ${APP_CONNECTIONS_ENCRYPTION_KEY:}
+    sync-interval-seconds: ${APP_CONNECTIONS_SYNC_INTERVAL_SECONDS:300}
   jwt:
     # 데모용 기본값. 운영에서는 APP_JWT_SECRET 환경변수로 주입한다.
     secret: ${APP_JWT_SECRET:asset-dashboard-local-development-secret-key-must-be-at-least-32-bytes}

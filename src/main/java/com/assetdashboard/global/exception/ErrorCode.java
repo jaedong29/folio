@@ -12,6 +12,10 @@ import org.springframework.http.HttpStatus;
 @Getter
 public enum ErrorCode {
 
+  CONNECTIONS_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "계좌 연결 준비 중입니다. 운영 설정을 확인해주세요."),
+  CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "연결 정보를 찾을 수 없습니다."),
+  CONNECTION_SYNC_THROTTLED(HttpStatus.TOO_MANY_REQUESTS, "동기화 중이거나 방금 갱신했습니다. 1분 뒤 다시 시도해주세요."),
+
   /** 매도·출금 수량이 보유 수량을 초과한 경우. */
   INSUFFICIENT_ASSET_QUANTITY(HttpStatus.BAD_REQUEST, "보유 수량이 부족합니다."),
 

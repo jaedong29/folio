@@ -35,6 +35,9 @@ jobs:
       - name: Build and test (H2, 실제 외부 호출 없음)
         run: ./gradlew clean test --no-daemon
 
+      - name: Frontend security and session regressions
+        run: node --test scripts/test-frontend.cjs
+
       - name: Upload test report on failure
         if: failure()
         uses: actions/upload-artifact@v4

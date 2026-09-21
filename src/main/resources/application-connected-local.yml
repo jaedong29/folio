@@ -1,0 +1,29 @@
+# Local personal-account testing. This profile never exposes the listener to the LAN.
+server:
+  address: 127.0.0.1
+  port: 8081
+spring:
+  datasource:
+    url: jdbc:h2:file:./.folio-local/portfolio;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ${FOLIO_LOCAL_DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+  flyway:
+    enabled: false
+  sql:
+    init:
+      mode: never
+  h2:
+    console:
+      enabled: false
+app:
+  connections:
+    enabled: true
+  news:
+    external-enabled: false
+    summary-enabled: false
+  ai:
+    enabled: false
